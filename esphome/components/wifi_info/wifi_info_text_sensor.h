@@ -61,15 +61,41 @@ class DNSAddressWifiInfo : public PollingComponent, public text_sensor::TextSens
 class ScanResultsWiFiInfo : public PollingComponent, public text_sensor::TextSensor {
  public:
   void update() override {
-    std::string scan_results;
-    for (auto &scan : wifi::global_wifi_component->get_scan_result()) {
+    auto scan_results_list = wifi::global_wifi_component->get_scan_result();
+    std::unordered_map<std::string, int> ssid_count;
+    for (auto &scan : scan_results_list) {
       if (scan.get_is_hidden())
         continue;
 
-      scan_results += scan.get_ssid();
+      std::string ssid = scan.get_ssid();
+      ssid_count[ssid]++;
+    }
+
+    std::string scan_results;
+    for (auto &scan : scan_results_list) {
+      if (scan.get_is_hidden())
+        continue;
+
+      std::string ssid = scan.get_ssid();
+      scan_results += ssid;
+      if (ssid_count[ssid] > 1) {
+        char bssid_s[18];
+        auto bssid = scan.get_bssid();
+        sprintf(bssid_s, "%02X:%02X:%02X:%02X:%02X:%02X", bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+        scan_results += " (";
+        scan_results += bssid_s;
+        scan_results += ")";
+      }
       scan_results += ": ";
       scan_results += esphome::to_string(scan.get_rssi());
-      scan_results += "dB\n";
+      scan_results += "dB | ";
+    }
+
+    // Remove the trailing " | " from string
+    if (!scan_results.empty()) {
+      scan_results.pop_back();
+      scan_results.pop_back();
+      scan_results.pop_back();
     }
 
     if (this->last_scan_results_ != scan_results) {
