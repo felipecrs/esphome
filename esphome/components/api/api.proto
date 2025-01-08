@@ -354,6 +354,7 @@ message CoverCommandRequest {
   bool has_tilt = 6;
   float tilt = 7;
   bool stop = 8;
+  bool toggle = 9;
 }
 
 // ==================== FAN ====================

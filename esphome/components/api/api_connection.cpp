@@ -286,6 +286,8 @@ void APIConnection::cover_command(const CoverCommandRequest &msg) {
         break;
     }
   }
+  if (msg.toggle)
+    call.set_command_toggle();
   if (msg.has_position)
     call.set_position(msg.position);
   if (msg.has_tilt)

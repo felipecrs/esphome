@@ -471,6 +471,7 @@ class CoverCommandRequest : public ProtoMessage {
   uint32_t key{0};
   bool has_legacy_command{false};
   enums::LegacyCoverCommand legacy_command{};
+  bool toggle{false};
   bool has_position{false};
   float position{0.0f};
   bool has_tilt{false};
