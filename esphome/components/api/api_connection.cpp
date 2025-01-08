@@ -257,6 +257,7 @@ bool APIConnection::send_cover_info(cover::Cover *cover) {
     msg.name = cover->get_name();
   msg.unique_id = get_default_unique_id("cover", cover);
   msg.assumed_state = traits.get_is_assumed_state();
+  msg.supports_toggle = traits.get_supports_toggle();
   msg.supports_position = traits.get_supports_position();
   msg.supports_tilt = traits.get_supports_tilt();
   msg.supports_stop = traits.get_supports_stop();

@@ -432,6 +432,7 @@ class ListEntitiesCoverResponse : public ProtoMessage {
   std::string name{};
   std::string unique_id{};
   bool assumed_state{false};
+  bool supports_toggle{false};
   bool supports_position{false};
   bool supports_tilt{false};
   std::string device_class{};
