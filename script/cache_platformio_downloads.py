@@ -144,7 +144,7 @@ Examples:
     # Cache each URL
     success_count = 0
     for i, url in enumerate(urls, 1):
-        print(f"[{i}/{len(urls)}] Caching {url}")
+        print(f"[{i}/{len(urls)}] Checking {url}")
         try:
             # Use the download_with_progress from github_download_cache CLI
             from script.github_download_cache import download_with_progress
