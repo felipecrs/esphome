@@ -77,6 +77,10 @@ def patch_file_downloader():
             _LOGGER.debug("[GitHub Cache] This is a GitHub URL, checking cache...")
             self._esphome_use_cache = cache.get_cached_path(url, check_updates=True)
             if self._esphome_use_cache:
+                _LOGGER.info(
+                    "Found %s in cache, will restore instead of downloading",
+                    Path(url.split("?")[0]).name,
+                )
                 _LOGGER.debug(
                     "[GitHub Cache] Found in cache: %s", self._esphome_use_cache
                 )
