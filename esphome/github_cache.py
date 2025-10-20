@@ -89,7 +89,7 @@ class GitHubCache:
             etag: ETag header from previous response
 
         Returns:
-            True if modified (or unable to check), False if not modified
+            True if modified, False if not modified (or offline/unreachable)
         """
         if not last_modified and not etag:
             # No cache headers available, assume modified
@@ -115,9 +115,9 @@ class GitHubCache:
                     return False
                 # Other errors, assume modified to be safe
                 return True
-        except (OSError, urllib.error.URLError) as e:
-            # If check fails, assume not modified (use cache)
-            _LOGGER.debug("Failed to check if modified: %s", e)
+        except (OSError, urllib.error.URLError):
+            # If check fails (offline/network error), assume not modified (use cache)
+            _LOGGER.info("Cannot reach server (offline?), using cached file: %s", url)
             return False
 
     def get_cached_path(self, url: str, check_updates: bool = True) -> Path | None:

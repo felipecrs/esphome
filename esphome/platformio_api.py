@@ -99,7 +99,7 @@ def patch_file_downloader():
                 from os.path import join
 
                 self._destination = join(dest_dir, self._fname)
-            _LOGGER.info("Using cached download for %s", url)
+            # Note: Actual restoration logged in patched_start
             return None  # Don't call original_init
 
         # Normal initialization with retry logic
@@ -132,6 +132,9 @@ def patch_file_downloader():
         if cached_file:
             try:
                 shutil.copy2(cached_file, self._destination)
+                _LOGGER.info(
+                    "Restored %s from cache (avoided download)", Path(cached_file).name
+                )
                 return True
             except OSError as e:
                 _LOGGER.warning("Failed to copy from cache: %s", e)
