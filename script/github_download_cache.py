@@ -80,7 +80,7 @@ def download_with_progress(
 
         return cache_path
 
-    except Exception as e:
+    except (OSError, urllib.error.URLError) as e:
         if temp_path.exists():
             temp_path.unlink()
         raise RuntimeError(f"Failed to download {url}: {e}") from e

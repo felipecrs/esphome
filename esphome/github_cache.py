@@ -21,6 +21,9 @@ _LOGGER = logging.getLogger(__name__)
 class GitHubCache:
     """Manages caching of GitHub release downloads."""
 
+    # Cache expiration time in seconds (30 days)
+    CACHE_EXPIRATION_SECONDS = 30 * 24 * 60 * 60
+
     def __init__(self, cache_dir: Path | None = None):
         """Initialize the cache manager.
 
@@ -33,6 +36,11 @@ class GitHubCache:
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_file = self.cache_dir / "cache_metadata.json"
+        # Prune old files on initialization
+        try:
+            self._prune_old_files()
+        except Exception as e:
+            _LOGGER.debug("Failed to prune old cache files: %s", e)
 
     def _load_metadata(self) -> dict:
         """Load cache metadata from disk."""
@@ -40,7 +48,7 @@ class GitHubCache:
             try:
                 with open(self.metadata_file) as f:
                     return json.load(f)
-            except Exception:
+            except (OSError, ValueError, json.JSONDecodeError):
                 return {}
         return {}
 
@@ -49,7 +57,7 @@ class GitHubCache:
         try:
             with open(self.metadata_file, "w") as f:
                 json.dump(metadata, f, indent=2)
-        except Exception as e:
+        except OSError as e:
             _LOGGER.debug("Failed to save cache metadata: %s", e)
 
     @staticmethod
@@ -107,7 +115,7 @@ class GitHubCache:
                     return False
                 # Other errors, assume modified to be safe
                 return True
-        except Exception as e:
+        except (OSError, urllib.error.URLError) as e:
             # If check fails, assume not modified (use cache)
             _LOGGER.debug("Failed to check if modified: %s", e)
             return False
@@ -129,29 +137,36 @@ class GitHubCache:
         if not cache_path.exists():
             return None
 
-        if not check_updates:
-            _LOGGER.debug("Using cached file (no update check): %s", url)
-            return cache_path
-
-        # Load metadata and check if modified
+        # Load metadata
         metadata = self._load_metadata()
         cache_key = self._get_cache_key(url)
 
-        if cache_key not in metadata:
-            # Have file but no metadata, use it anyway
-            _LOGGER.debug("Using cached file (no metadata): %s", url)
-            return cache_path
+        # Check if file should be re-downloaded
+        should_redownload = False
+        if check_updates and cache_key in metadata:
+            last_modified = metadata[cache_key].get("last_modified")
+            etag = metadata[cache_key].get("etag")
+            if self._check_if_modified(url, last_modified, etag):
+                # File was modified, need to re-download
+                _LOGGER.debug("Cached file is outdated: %s", url)
+                should_redownload = True
 
-        last_modified = metadata[cache_key].get("last_modified")
-        etag = metadata[cache_key].get("etag")
-
-        if self._check_if_modified(url, last_modified, etag):
-            # File was modified, need to re-download
-            _LOGGER.debug("Cached file is outdated: %s", url)
+        if should_redownload:
             return None
 
-        # File not modified, use cache
-        _LOGGER.debug("Using cached file: %s", url)
+        # File is valid, update cached_at timestamp to keep it fresh
+        if cache_key in metadata:
+            metadata[cache_key]["cached_at"] = time.time()
+            self._save_metadata(metadata)
+
+        # Log appropriate message
+        if not check_updates:
+            _LOGGER.debug("Using cached file (no update check): %s", url)
+        elif cache_key not in metadata:
+            _LOGGER.debug("Using cached file (no metadata): %s", url)
+        else:
+            _LOGGER.debug("Using cached file: %s", url)
+
         return cache_path
 
     def save_to_cache(self, url: str, source_path: Path) -> None:
@@ -179,7 +194,7 @@ class GitHubCache:
                 response = urllib.request.urlopen(request, timeout=10)
                 last_modified = response.headers.get("Last-Modified")
                 etag = response.headers.get("ETag")
-            except Exception:
+            except (OSError, urllib.error.URLError):
                 pass
 
             # Update metadata
@@ -197,7 +212,7 @@ class GitHubCache:
 
             _LOGGER.debug("Saved to cache: %s", url)
 
-        except Exception as e:
+        except OSError as e:
             _LOGGER.debug("Failed to save to cache: %s", e)
 
     def copy_from_cache(self, url: str, destination: Path) -> bool:
@@ -218,7 +233,7 @@ class GitHubCache:
             shutil.copy2(cached_path, destination)
             _LOGGER.info("Using cached download for %s", url)
             return True
-        except Exception as e:
+        except OSError as e:
             _LOGGER.warning("Failed to use cache: %s", e)
             return False
 
@@ -229,7 +244,7 @@ class GitHubCache:
             for file_path in self.cache_dir.glob("*"):
                 if file_path.is_file() and file_path != self.metadata_file:
                     total += file_path.stat().st_size
-        except Exception:
+        except OSError:
             pass
         return total
 
@@ -263,8 +278,76 @@ class GitHubCache:
                 if file_path.is_file():
                     file_path.unlink()
             _LOGGER.info("Cache cleared: %s", self.cache_dir)
-        except Exception as e:
+        except OSError as e:
             _LOGGER.warning("Failed to clear cache: %s", e)
+
+    def _prune_old_files(self) -> None:
+        """Remove cache files older than CACHE_EXPIRATION_SECONDS."""
+        current_time = time.time()
+        metadata = self._load_metadata()
+        removed_count = 0
+        removed_size = 0
+
+        # Check each file in metadata
+        for cache_key, meta in list(metadata.items()):
+            cached_at = meta.get("cached_at", 0)
+            age_seconds = current_time - cached_at
+
+            if age_seconds > self.CACHE_EXPIRATION_SECONDS:
+                # File is too old, remove it
+                cache_path = (
+                    self.cache_dir
+                    / f"{cache_key}{Path(meta['url'].split('?')[0]).suffix}"
+                )
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+                    cache_path.unlink()
+                    removed_size += file_size
+                    removed_count += 1
+                    _LOGGER.debug(
+                        "Pruned old cache file (age: %.1f days): %s",
+                        age_seconds / (24 * 60 * 60),
+                        meta["url"],
+                    )
+
+                # Remove from metadata
+                del metadata[cache_key]
+
+        # Also check for orphaned files (files without metadata)
+        for file_path in self.cache_dir.glob("*.zip"):
+            if file_path == self.metadata_file:
+                continue
+
+            # Check if file is in metadata
+            found_in_metadata = False
+            for cache_key in metadata:
+                if file_path.name.startswith(cache_key):
+                    found_in_metadata = True
+                    break
+
+            if not found_in_metadata:
+                # Orphaned file - check age by modification time
+                file_age = current_time - file_path.stat().st_mtime
+                if file_age > self.CACHE_EXPIRATION_SECONDS:
+                    file_size = file_path.stat().st_size
+                    file_path.unlink()
+                    removed_size += file_size
+                    removed_count += 1
+                    _LOGGER.debug(
+                        "Pruned orphaned cache file (age: %.1f days): %s",
+                        file_age / (24 * 60 * 60),
+                        file_path.name,
+                    )
+
+        # Save updated metadata if anything was removed
+        if removed_count > 0:
+            self._save_metadata(metadata)
+            removed_mb = removed_size / (1024 * 1024)
+            _LOGGER.info(
+                "Pruned %d old cache file(s), freed %.2f MB",
+                removed_count,
+                removed_mb,
+            )
 
 
 # Global cache instance

@@ -133,7 +133,7 @@ def patch_file_downloader():
             try:
                 shutil.copy2(cached_file, self._destination)
                 return True
-            except Exception as e:
+            except OSError as e:
                 _LOGGER.warning("Failed to copy from cache: %s", e)
                 # Fall through to re-download
 
@@ -144,7 +144,7 @@ def patch_file_downloader():
         if cache_url:
             try:
                 cache.save_to_cache(cache_url, Path(self._destination))
-            except Exception as e:
+            except OSError as e:
                 _LOGGER.debug("Failed to save to cache: %s", e)
 
         return result

@@ -53,15 +53,8 @@ def extract_github_urls(platformio_ini: Path) -> list[str]:
                 matches = github_pattern.findall(line)
                 urls.extend(matches)
 
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_urls = []
-    for url in urls:
-        if url not in seen:
-            seen.add(url)
-            unique_urls.append(url)
-
-    return unique_urls
+    # Remove duplicates while preserving order using dict
+    return list(dict.fromkeys(urls))
 
 
 def main():
