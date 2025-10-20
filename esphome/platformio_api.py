@@ -50,15 +50,18 @@ def patch_file_downloader():
     # Import our cache module
     from esphome.github_cache import GitHubCache
 
-    _LOGGER.info("Applying GitHub download cache patch...")
+    _LOGGER.debug("Applying GitHub download cache patch...")
 
     original_init = FileDownloader.__init__
     original_start = FileDownloader.start
 
     # Initialize cache in .platformio directory so it benefits from GitHub Actions cache
     platformio_dir = Path.home() / ".platformio"
-    cache = GitHubCache(cache_dir=platformio_dir / "esphome_download_cache")
-    _LOGGER.info("GitHub download cache initialized at: %s", cache.cache_dir)
+    cache_dir = platformio_dir / "esphome_download_cache"
+    cache_dir_existed = cache_dir.exists()
+    cache = GitHubCache(cache_dir=cache_dir)
+    if not cache_dir_existed:
+        _LOGGER.info("Created GitHub download cache at: %s", cache.cache_dir)
 
     def patched_init(self, *args, **kwargs):
         """Patched init that checks cache before making HTTP connection."""
