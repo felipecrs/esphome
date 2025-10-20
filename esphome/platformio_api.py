@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import re
 import subprocess
-from typing import Any
 
 from esphome.const import CONF_COMPILE_PROCESS_LIMIT, CONF_ESPHOME, KEY_CORE
 from esphome.core import CORE, EsphomeError
@@ -44,15 +43,67 @@ def patch_structhash():
 
 
 def patch_file_downloader():
-    """Patch PlatformIO's FileDownloader to retry on PackageException errors."""
+    """Patch PlatformIO's FileDownloader to add caching and retry on PackageException errors."""
     from platformio.package.download import FileDownloader
     from platformio.package.exception import PackageException
 
+    # Import our cache module
+    from esphome.github_cache import GitHubCache
+
+    _LOGGER.info("Applying GitHub download cache patch...")
+
     original_init = FileDownloader.__init__
+    original_start = FileDownloader.start
 
-    def patched_init(self, *args: Any, **kwargs: Any) -> None:
+    # Initialize cache in .platformio directory so it benefits from GitHub Actions cache
+    platformio_dir = Path.home() / ".platformio"
+    cache = GitHubCache(cache_dir=platformio_dir / "esphome_download_cache")
+    _LOGGER.info("GitHub download cache initialized at: %s", cache.cache_dir)
+
+    def patched_init(self, *args, **kwargs):
+        """Patched init that checks cache before making HTTP connection."""
+        # Extract URL from args (first positional argument)
+        url = args[0] if args else kwargs.get("url")
+        dest_dir = args[1] if len(args) > 1 else kwargs.get("dest_dir")
+
+        # Debug: Log all downloads
+        _LOGGER.debug("[GitHub Cache] Download request for: %s", url)
+
+        # Store URL for later use (original FileDownloader doesn't store it)
+        self._esphome_cache_url = url if cache.is_github_url(url) else None
+
+        # Check cache for GitHub URLs BEFORE making HTTP request
+        if self._esphome_cache_url:
+            _LOGGER.debug("[GitHub Cache] This is a GitHub URL, checking cache...")
+            self._esphome_use_cache = cache.get_cached_path(url, check_updates=True)
+            if self._esphome_use_cache:
+                _LOGGER.debug(
+                    "[GitHub Cache] Found in cache: %s", self._esphome_use_cache
+                )
+            else:
+                _LOGGER.debug("[GitHub Cache] Not in cache, will download and cache")
+        else:
+            self._esphome_use_cache = None
+            if url and str(url).startswith("http"):
+                _LOGGER.debug("[GitHub Cache] Not a GitHub URL, skipping cache")
+
+        # Only make HTTP connection if we don't have cached file
+        if self._esphome_use_cache:
+            # Skip HTTP connection, we'll handle this in start()
+            # Set minimal attributes to satisfy FileDownloader
+            self._http_session = None
+            self._http_response = None
+            self._fname = Path(url.split("?")[0]).name
+            self._destination = self._fname
+            if dest_dir:
+                from os.path import join
+
+                self._destination = join(dest_dir, self._fname)
+            _LOGGER.info("Using cached download for %s", url)
+            return None  # Don't call original_init
+
+        # Normal initialization with retry logic
         max_retries = 3
-
         for attempt in range(max_retries):
             try:
                 return original_init(self, *args, **kwargs)
@@ -69,7 +120,37 @@ def patch_file_downloader():
                     raise
         return None
 
+    def patched_start(self, *args, **kwargs):
+        """Patched start that uses cache when available."""
+        import shutil
+
+        # Get the cache URL and path that were set in __init__
+        cache_url = getattr(self, "_esphome_cache_url", None)
+        cached_file = getattr(self, "_esphome_use_cache", None)
+
+        # If we're using cache, copy file instead of downloading
+        if cached_file:
+            try:
+                shutil.copy2(cached_file, self._destination)
+                return True
+            except Exception as e:
+                _LOGGER.warning("Failed to copy from cache: %s", e)
+                # Fall through to re-download
+
+        # Perform normal download
+        result = original_start(self, *args, **kwargs)
+
+        # Save to cache if it was a GitHub URL
+        if cache_url:
+            try:
+                cache.save_to_cache(cache_url, Path(self._destination))
+            except Exception as e:
+                _LOGGER.debug("Failed to save to cache: %s", e)
+
+        return result
+
     FileDownloader.__init__ = patched_init
+    FileDownloader.start = patched_start
 
 
 IGNORE_LIB_WARNINGS = f"(?:{'|'.join(['Hash', 'Update'])})"
@@ -87,6 +168,8 @@ FILTER_PLATFORMIO_LINES = [
     r"Memory Usage -> https://bit.ly/pio-memory-usage",
     r"Found: https://platformio.org/lib/show/.*",
     r"Using cache: .*",
+    # Don't filter our cache messages - let users see when cache is being used
+    # r"Using cached download for .*",
     r"Installing dependencies",
     r"Library Manager: Already installed, built-in library",
     r"Building in .* mode",
