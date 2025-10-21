@@ -215,6 +215,7 @@ template<typename T> class FixedVector {
   ~FixedVector() { cleanup_(); }
 
   // Disable copy operations (avoid accidental expensive copies)
+  // Use copy_from() for explicit copying when needed (e.g., copy_select)
   FixedVector(const FixedVector &) = delete;
   FixedVector &operator=(const FixedVector &) = delete;
 
@@ -246,8 +247,10 @@ template<typename T> class FixedVector {
     return *this;
   }
 
-  /// Copy another FixedVector (explicit copy for special cases like copy_select)
-  /// Creates exact duplicate of source vector
+  /// Explicitly copy another FixedVector
+  /// This method exists instead of operator= to make copying intentional and visible.
+  /// Copying is expensive on embedded systems, so we require explicit opt-in.
+  /// Use cases: copy_select (copying source options), lvgl (copying widget options)
   void copy_from(const FixedVector &other) {
     cleanup_();
     reset_();
