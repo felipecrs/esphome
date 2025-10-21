@@ -246,6 +246,17 @@ template<typename T> class FixedVector {
     return *this;
   }
 
+  /// Copy another FixedVector (explicit copy for special cases like copy_select)
+  /// Creates exact duplicate of source vector
+  void copy_from(const FixedVector &other) {
+    cleanup_();
+    reset_();
+    init(other.size());
+    for (const auto &item : other) {
+      push_back(item);
+    }
+  }
+
   // Allocate capacity - can be called multiple times to reinit
   void init(size_t n) {
     cleanup_();
@@ -304,6 +315,11 @@ template<typename T> class FixedVector {
     return data_[size_ - 1];
   }
 
+  /// Access first element (no bounds checking - matches std::vector behavior)
+  /// Caller must ensure vector is not empty (size() > 0)
+  T &front() { return data_[0]; }
+  const T &front() const { return data_[0]; }
+
   /// Access last element (no bounds checking - matches std::vector behavior)
   /// Caller must ensure vector is not empty (size() > 0)
   T &back() { return data_[size_ - 1]; }
@@ -316,6 +332,12 @@ template<typename T> class FixedVector {
   /// Caller must ensure index is valid (i < size())
   T &operator[](size_t i) { return data_[i]; }
   const T &operator[](size_t i) const { return data_[i]; }
+
+  /// Access element with bounds checking (matches std::vector behavior)
+  /// Returns reference to element at index i
+  /// Behavior for out of bounds access matches std::vector::at() (undefined on embedded)
+  T &at(size_t i) { return data_[i]; }
+  const T &at(size_t i) const { return data_[i]; }
 
   // Iterator support for range-based for loops
   T *begin() { return data_; }
