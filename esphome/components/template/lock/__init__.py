@@ -16,6 +16,9 @@ from esphome.const import (
 from .. import template_ns
 
 TemplateLock = template_ns.class_("TemplateLock", lock.Lock, cg.Component)
+StatelessTemplateLock = template_ns.class_(
+    "StatelessTemplateLock", lock.Lock, cg.Component
+)
 
 TemplateLockPublishAction = template_ns.class_(
     "TemplateLockPublishAction",

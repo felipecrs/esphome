@@ -76,7 +76,8 @@ template<typename StateF, typename TiltF> void TemplateCoverBase<StateF, TiltF>:
 
   this->publish_state();
 }
-CoverTraits TemplateCover::get_traits() {
+
+template<typename StateF, typename TiltF> CoverTraits TemplateCoverBase<StateF, TiltF>::get_traits() {
   auto traits = CoverTraits();
   traits.set_is_assumed_state(this->assumed_state_);
   traits.set_supports_stop(this->has_stop_);
@@ -85,19 +86,16 @@ CoverTraits TemplateCover::get_traits() {
   traits.set_supports_tilt(this->has_tilt_);
   return traits;
 }
-Trigger<float> *TemplateCover::get_position_trigger() const { return this->position_trigger_; }
-Trigger<float> *TemplateCover::get_tilt_trigger() const { return this->tilt_trigger_; }
-void TemplateCover::set_tilt_lambda(std::function<optional<float>()> &&tilt_f) { this->tilt_f_ = tilt_f; }
-void TemplateCover::set_has_stop(bool has_stop) { this->has_stop_ = has_stop; }
-void TemplateCover::set_has_toggle(bool has_toggle) { this->has_toggle_ = has_toggle; }
-void TemplateCover::set_has_position(bool has_position) { this->has_position_ = has_position; }
-void TemplateCover::set_has_tilt(bool has_tilt) { this->has_tilt_ = has_tilt; }
-void TemplateCover::stop_prev_trigger_() {
+
+template<typename StateF, typename TiltF> void TemplateCoverBase<StateF, TiltF>::stop_prev_trigger_() {
   if (this->prev_command_trigger_ != nullptr) {
     this->prev_command_trigger_->stop_action();
     this->prev_command_trigger_ = nullptr;
   }
 }
+
+template class TemplateCoverBase<std::function<optional<float>()>, std::function<optional<float>()>>;
+template class TemplateCoverBase<optional<float> (*)(), optional<float> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome
