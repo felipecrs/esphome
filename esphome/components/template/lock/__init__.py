@@ -58,14 +58,22 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = await lock.new_lock(config)
-    await cg.register_component(var, config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateLock or StatelessTemplateLock
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(lock.LockState)
         )
-        cg.add(var.set_state_lambda(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateLock
+        )
+        # Manually register as lock since we didn't use new_lock
+        await lock.register_lock(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No lambda - just create the base template lock
+        var = await lock.new_lock(config)
+        await cg.register_component(var, config)
+
     if CONF_UNLOCK_ACTION in config:
         await automation.build_automation(
             var.get_unlock_trigger(), [], config[CONF_UNLOCK_ACTION]
