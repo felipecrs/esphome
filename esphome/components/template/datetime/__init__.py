@@ -5,6 +5,7 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_DAY,
     CONF_HOUR,
+    CONF_ID,
     CONF_INITIAL_VALUE,
     CONF_LAMBDA,
     CONF_MINUTE,
@@ -25,13 +26,22 @@ CODEOWNERS = ["@rfdarter"]
 TemplateDate = template_ns.class_(
     "TemplateDate", datetime.DateEntity, cg.PollingComponent
 )
+StatelessTemplateDate = template_ns.class_(
+    "StatelessTemplateDate", datetime.DateEntity, cg.PollingComponent
+)
 
 TemplateTime = template_ns.class_(
     "TemplateTime", datetime.TimeEntity, cg.PollingComponent
 )
+StatelessTemplateTime = template_ns.class_(
+    "StatelessTemplateTime", datetime.TimeEntity, cg.PollingComponent
+)
 
 TemplateDateTime = template_ns.class_(
     "TemplateDateTime", datetime.DateTimeEntity, cg.PollingComponent
+)
+StatelessTemplateDateTime = template_ns.class_(
+    "StatelessTemplateDateTime", datetime.DateTimeEntity, cg.PollingComponent
 )
 
 
@@ -99,15 +109,30 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = await datetime.new_datetime(config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either Template* or StatelessTemplate*
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(cg.ESPTime)
         )
-        cg.add(var.set_template(template_))
+        # Determine the appropriate stateless class based on type
+        if config[CONF_TYPE] == "DATE":
+            stateless_class = StatelessTemplateDate
+        elif config[CONF_TYPE] == "TIME":
+            stateless_class = StatelessTemplateTime
+        else:  # DATETIME
+            stateless_class = StatelessTemplateDateTime
 
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, stateless_class
+        )
+        # Manually register as datetime since we didn't use new_datetime
+        await datetime.register_datetime(var, config)
+        await cg.register_component(var, config)
     else:
+        # No lambda - just create the base template datetime
+        var = await datetime.new_datetime(config)
+        await cg.register_component(var, config)
+
         cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
         cg.add(var.set_restore_value(config[CONF_RESTORE_VALUE]))
 
@@ -146,5 +171,3 @@ async def to_code(config):
             [(cg.ESPTime, "x")],
             config[CONF_SET_ACTION],
         )
-
-    await cg.register_component(var, config)

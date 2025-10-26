@@ -23,6 +23,9 @@ from esphome.const import (
 from .. import template_ns
 
 TemplateCover = template_ns.class_("TemplateCover", cover.Cover, cg.Component)
+StatelessTemplateCover = template_ns.class_(
+    "StatelessTemplateCover", cover.Cover, cg.Component
+)
 
 TemplateCoverRestoreMode = template_ns.enum("TemplateCoverRestoreMode")
 RESTORE_MODES = {
@@ -63,13 +66,22 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    var = await cover.new_cover(config)
-    await cg.register_component(var, config)
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateCover or StatelessTemplateCover
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(float)
         )
-        cg.add(var.set_state_lambda(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateCover
+        )
+        # Manually register as cover since we didn't use new_cover
+        await cover.register_cover(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No state lambda - just create the base template cover
+        var = await cover.new_cover(config)
+        await cg.register_component(var, config)
+
     if CONF_OPEN_ACTION in config:
         await automation.build_automation(
             var.get_open_trigger(), [], config[CONF_OPEN_ACTION]

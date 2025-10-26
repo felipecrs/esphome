@@ -9,7 +9,8 @@ namespace template_ {
 
 static const char *const TAG = "template.datetime";
 
-void TemplateDateTime::setup() {
+// Template instantiations
+template<typename F> void TemplateDateTimeBase<F>::setup() {
   if (this->f_.has_value())
     return;
 
@@ -39,24 +40,7 @@ void TemplateDateTime::setup() {
   this->publish_state();
 }
 
-void TemplateDateTime::update() {
-  if (!this->f_.has_value())
-    return;
-
-  auto val = (*this->f_)();
-  if (!val.has_value())
-    return;
-
-  this->year_ = val->year;
-  this->month_ = val->month;
-  this->day_ = val->day_of_month;
-  this->hour_ = val->hour;
-  this->minute_ = val->minute;
-  this->second_ = val->second;
-  this->publish_state();
-}
-
-void TemplateDateTime::control(const datetime::DateTimeCall &call) {
+template<typename F> void TemplateDateTimeBase<F>::control(const datetime::DateTimeCall &call) {
   bool has_year = call.get_year().has_value();
   bool has_month = call.get_month().has_value();
   bool has_day = call.get_day().has_value();
@@ -138,11 +122,14 @@ void TemplateDateTime::control(const datetime::DateTimeCall &call) {
   }
 }
 
-void TemplateDateTime::dump_config() {
+template<typename F> void TemplateDateTimeBase<F>::dump_config() {
   LOG_DATETIME_DATETIME("", "Template DateTime", this);
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   LOG_UPDATE_INTERVAL(this);
 }
+
+template class TemplateDateTimeBase<std::function<optional<ESPTime>()>>;
+template class TemplateDateTimeBase<optional<ESPTime> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

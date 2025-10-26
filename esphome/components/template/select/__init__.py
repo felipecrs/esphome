@@ -17,6 +17,9 @@ from .. import template_ns
 TemplateSelect = template_ns.class_(
     "TemplateSelect", select.Select, cg.PollingComponent
 )
+StatelessTemplateSelect = template_ns.class_(
+    "StatelessTemplateSelect", select.Select, cg.PollingComponent
+)
 
 
 def validate(config):
@@ -62,22 +65,34 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await select.register_select(var, config, options=config[CONF_OPTIONS])
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateSelect or StatelessTemplateSelect
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(cg.std_string)
         )
-        cg.add(var.set_template(template_))
-
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateSelect
+        )
+        await cg.register_component(var, config)
+        await select.register_select(var, config, options=config[CONF_OPTIONS])
     else:
-        cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
-        cg.add(var.set_initial_option(config[CONF_INITIAL_OPTION]))
+        # No lambda - just create the base template select
+        var = cg.new_Pvariable(config[CONF_ID])
+        await cg.register_component(var, config)
+        await select.register_select(var, config, options=config[CONF_OPTIONS])
 
-        if CONF_RESTORE_VALUE in config:
-            cg.add(var.set_restore_value(config[CONF_RESTORE_VALUE]))
+        # Only set if non-default to avoid bloating setup() function
+        if config[CONF_OPTIMISTIC]:
+            cg.add(var.set_optimistic(True))
+        initial_option_index = config[CONF_OPTIONS].index(config[CONF_INITIAL_OPTION])
+        # Only set if non-zero to avoid bloating setup() function
+        # (initial_option_index_ is zero-initialized in the header)
+        if initial_option_index != 0:
+            cg.add(var.set_initial_option_index(initial_option_index))
+
+        # Only set if True (default is False)
+        if config.get(CONF_RESTORE_VALUE):
+            cg.add(var.set_restore_value(True))
 
     if CONF_SET_ACTION in config:
         await automation.build_automation(

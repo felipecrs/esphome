@@ -20,6 +20,9 @@ from esphome.const import (
 from .. import template_ns
 
 TemplateValve = template_ns.class_("TemplateValve", valve.Valve, cg.Component)
+StatelessTemplateValve = template_ns.class_(
+    "StatelessTemplateValve", valve.Valve, cg.Component
+)
 
 TemplateValvePublishAction = template_ns.class_(
     "TemplateValvePublishAction", automation.Action, cg.Parented.template(TemplateValve)
@@ -62,13 +65,22 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    var = await valve.new_valve(config)
-    await cg.register_component(var, config)
     if lambda_config := config.get(CONF_LAMBDA):
+        # Use new_lambda_pvariable to create either TemplateValve or StatelessTemplateValve
         template_ = await cg.process_lambda(
             lambda_config, [], return_type=cg.optional.template(float)
         )
-        cg.add(var.set_state_lambda(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateValve
+        )
+        # Manually register as valve since we didn't use new_valve
+        await valve.register_valve(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No lambda - just create the base template valve
+        var = await valve.new_valve(config)
+        await cg.register_component(var, config)
+
     if open_action_config := config.get(CONF_OPEN_ACTION):
         await automation.build_automation(
             var.get_open_trigger(), [], open_action_config

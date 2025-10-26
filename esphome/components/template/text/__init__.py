@@ -3,6 +3,7 @@ import esphome.codegen as cg
 from esphome.components import text
 import esphome.config_validation as cv
 from esphome.const import (
+    CONF_ID,
     CONF_INITIAL_VALUE,
     CONF_LAMBDA,
     CONF_MAX_LENGTH,
@@ -16,6 +17,9 @@ from esphome.const import (
 from .. import template_ns
 
 TemplateText = template_ns.class_("TemplateText", text.Text, cg.PollingComponent)
+StatelessTemplateText = template_ns.class_(
+    "StatelessTemplateText", text.Text, cg.PollingComponent
+)
 
 TextSaverBase = template_ns.class_("TemplateTextSaverBase")
 TextSaverTemplate = template_ns.class_("TextSaver", TextSaverBase)
@@ -65,21 +69,31 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = await text.new_text(
-        config,
-        min_length=config[CONF_MIN_LENGTH],
-        max_length=config[CONF_MAX_LENGTH],
-        pattern=config.get(CONF_PATTERN),
-    )
-    await cg.register_component(var, config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateText or StatelessTemplateText
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(cg.std_string)
         )
-        cg.add(var.set_template(template_))
-
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateText
+        )
+        await cg.register_component(var, config)
+        await text.register_text(
+            var,
+            config,
+            min_length=config[CONF_MIN_LENGTH],
+            max_length=config[CONF_MAX_LENGTH],
+            pattern=config.get(CONF_PATTERN),
+        )
     else:
+        # No lambda - just create the base template text
+        var = await text.new_text(
+            config,
+            min_length=config[CONF_MIN_LENGTH],
+            max_length=config[CONF_MAX_LENGTH],
+            pattern=config.get(CONF_PATTERN),
+        )
+        await cg.register_component(var, config)
         cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
         if initial_value_config := config.get(CONF_INITIAL_VALUE):
             cg.add(var.set_initial_value(initial_value_config))

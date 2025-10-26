@@ -6,18 +6,11 @@ namespace template_ {
 
 static const char *const TAG = "template.text_sensor";
 
-void TemplateTextSensor::update() {
-  if (!this->f_.has_value())
-    return;
+// Template instantiations
+template<typename F> void TemplateTextSensorBase<F>::dump_config() { LOG_TEXT_SENSOR("", "Template Sensor", this); }
 
-  auto val = (*this->f_)();
-  if (val.has_value()) {
-    this->publish_state(*val);
-  }
-}
-float TemplateTextSensor::get_setup_priority() const { return setup_priority::HARDWARE; }
-void TemplateTextSensor::set_template(std::function<optional<std::string>()> &&f) { this->f_ = f; }
-void TemplateTextSensor::dump_config() { LOG_TEXT_SENSOR("", "Template Sensor", this); }
+template class TemplateTextSensorBase<std::function<optional<std::string>()>>;
+template class TemplateTextSensorBase<optional<std::string> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

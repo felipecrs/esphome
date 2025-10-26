@@ -59,13 +59,24 @@ template<uint8_t SZ> class TextSaver : public TemplateTextSaverBase {
   }
 };
 
-class TemplateText : public text::Text, public PollingComponent {
+template<typename F> class TemplateTextBase : public text::Text, public PollingComponent {
  public:
-  void set_template(std::function<optional<std::string>()> &&f) { this->f_ = f; }
+  TemplateTextBase() : set_trigger_(new Trigger<std::string>()) {}
 
   void setup() override;
-  void update() override;
   void dump_config() override;
+
+  void update() override {
+    if (this->f_ == nullptr)
+      return;
+    if (!this->f_.has_value())
+      return;
+    auto val = (*this->f_)();
+    if (!val.has_value())
+      return;
+    this->publish_state(*val);
+  }
+
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
   Trigger<std::string> *get_set_trigger() const { return this->set_trigger_; }
@@ -77,10 +88,25 @@ class TemplateText : public text::Text, public PollingComponent {
   void control(const std::string &value) override;
   bool optimistic_ = false;
   std::string initial_value_;
-  Trigger<std::string> *set_trigger_ = new Trigger<std::string>();
-  optional<std::function<optional<std::string>()>> f_{nullptr};
+  Trigger<std::string> *set_trigger_;
+  optional<F> f_{nullptr};
 
   TemplateTextSaverBase *pref_ = nullptr;
+};
+
+class TemplateText : public TemplateTextBase<std::function<optional<std::string>()>> {
+ public:
+  void set_template(std::function<optional<std::string>()> &&f) { this->f_ = f; }
+};
+
+/** Optimized template text for stateless lambdas (no capture).
+ *
+ * Uses function pointer instead of std::function to reduce memory overhead.
+ * Memory: 4 bytes (function pointer on 32-bit) vs 32 bytes (std::function).
+ */
+class StatelessTemplateText : public TemplateTextBase<optional<std::string> (*)()> {
+ public:
+  explicit StatelessTemplateText(optional<std::string> (*f)()) { this->f_ = f; }
 };
 
 }  // namespace template_
