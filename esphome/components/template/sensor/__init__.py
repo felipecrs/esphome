@@ -9,6 +9,9 @@ from .. import template_ns
 TemplateSensor = template_ns.class_(
     "TemplateSensor", sensor.Sensor, cg.PollingComponent
 )
+StatelessTemplateSensor = template_ns.class_(
+    "StatelessTemplateSensor", sensor.Sensor, cg.PollingComponent
+)
 
 CONFIG_SCHEMA = (
     sensor.sensor_schema(
@@ -25,14 +28,21 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    var = await sensor.new_sensor(config)
-    await cg.register_component(var, config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateSensor or StatelessTemplateSensor
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(float)
         )
-        cg.add(var.set_template(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateSensor
+        )
+        # Manually register as sensor since we didn't use new_sensor
+        await sensor.register_sensor(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No lambda - just create the base template sensor
+        var = await sensor.new_sensor(config)
+        await cg.register_component(var, config)
 
 
 @automation.register_action(

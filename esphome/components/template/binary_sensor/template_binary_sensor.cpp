@@ -6,18 +6,13 @@ namespace template_ {
 
 static const char *const TAG = "template.binary_sensor";
 
-void TemplateBinarySensor::setup() { this->loop(); }
-
-void TemplateBinarySensor::loop() {
-  if (this->f_ == nullptr)
-    return;
-
-  auto s = this->f_();
-  if (s.has_value()) {
-    this->publish_state(*s);
-  }
+// Template instantiations
+template<typename F> void TemplateBinarySensorBase<F>::dump_config() {
+  LOG_BINARY_SENSOR("", "Template Binary Sensor", this);
 }
-void TemplateBinarySensor::dump_config() { LOG_BINARY_SENSOR("", "Template Binary Sensor", this); }
+
+template class TemplateBinarySensorBase<std::function<optional<bool>()>>;
+template class TemplateBinarySensorBase<optional<bool> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

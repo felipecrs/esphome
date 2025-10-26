@@ -10,6 +10,9 @@ from .. import template_ns
 TemplateTextSensor = template_ns.class_(
     "TemplateTextSensor", text_sensor.TextSensor, cg.PollingComponent
 )
+StatelessTemplateTextSensor = template_ns.class_(
+    "StatelessTemplateTextSensor", text_sensor.TextSensor, cg.PollingComponent
+)
 
 CONFIG_SCHEMA = (
     text_sensor.text_sensor_schema()
@@ -24,14 +27,21 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    var = await text_sensor.new_text_sensor(config)
-    await cg.register_component(var, config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateTextSensor or StatelessTemplateTextSensor
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(cg.std_string)
         )
-        cg.add(var.set_template(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateTextSensor
+        )
+        # Manually register as text sensor since we didn't use new_text_sensor
+        await text_sensor.register_text_sensor(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No lambda - just create the base template text sensor
+        var = await text_sensor.new_text_sensor(config)
+        await cg.register_component(var, config)
 
 
 @automation.register_action(

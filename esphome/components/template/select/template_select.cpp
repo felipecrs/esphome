@@ -6,7 +6,8 @@ namespace template_ {
 
 static const char *const TAG = "template.select";
 
-void TemplateSelect::setup() {
+// Template instantiations
+template<typename F> void TemplateSelectBase<F>::setup() {
   if (this->f_.has_value())
     return;
 
@@ -27,23 +28,7 @@ void TemplateSelect::setup() {
   this->publish_state(this->at(index).value());
 }
 
-void TemplateSelect::update() {
-  if (!this->f_.has_value())
-    return;
-
-  auto val = (*this->f_)();
-  if (!val.has_value())
-    return;
-
-  if (!this->has_option(*val)) {
-    ESP_LOGE(TAG, "Lambda returned an invalid option: %s", (*val).c_str());
-    return;
-  }
-
-  this->publish_state(*val);
-}
-
-void TemplateSelect::control(const std::string &value) {
+template<typename F> void TemplateSelectBase<F>::control(const std::string &value) {
   this->set_trigger_->trigger(value);
 
   if (this->optimistic_)
@@ -55,7 +40,7 @@ void TemplateSelect::control(const std::string &value) {
   }
 }
 
-void TemplateSelect::dump_config() {
+template<typename F> void TemplateSelectBase<F>::dump_config() {
   LOG_SELECT("", "Template Select", this);
   LOG_UPDATE_INTERVAL(this);
   if (this->f_.has_value())
@@ -67,6 +52,9 @@ void TemplateSelect::dump_config() {
                 YESNO(this->optimistic_), this->at(this->initial_option_index_).value().c_str(),
                 YESNO(this->restore_value_));
 }
+
+template class TemplateSelectBase<std::function<optional<std::string>()>>;
+template class TemplateSelectBase<optional<std::string> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

@@ -16,6 +16,9 @@ from esphome.const import (
 from .. import template_ns
 
 TemplateSwitch = template_ns.class_("TemplateSwitch", switch.Switch, cg.Component)
+StatelessTemplateSwitch = template_ns.class_(
+    "StatelessTemplateSwitch", switch.Switch, cg.Component
+)
 
 
 def validate(config):
@@ -55,14 +58,22 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = await switch.new_switch(config)
-    await cg.register_component(var, config)
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateSwitch or StatelessTemplateSwitch
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(bool)
         )
-        cg.add(var.set_state_lambda(template_))
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateSwitch
+        )
+        # Manually register as switch since we didn't use new_switch
+        await switch.register_switch(var, config)
+        await cg.register_component(var, config)
+    else:
+        # No lambda - just create the base template switch
+        var = await switch.new_switch(config)
+        await cg.register_component(var, config)
+
     if CONF_TURN_OFF_ACTION in config:
         await automation.build_automation(
             var.get_turn_off_trigger(), [], config[CONF_TURN_OFF_ACTION]

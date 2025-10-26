@@ -8,13 +8,22 @@
 namespace esphome {
 namespace template_ {
 
-class TemplateNumber : public number::Number, public PollingComponent {
+template<typename F> class TemplateNumberBase : public number::Number, public PollingComponent {
  public:
-  void set_template(std::function<optional<float>()> &&f) { this->f_ = f; }
+  TemplateNumberBase() : set_trigger_(new Trigger<float>()) {}
 
   void setup() override;
-  void update() override;
   void dump_config() override;
+
+  void update() override {
+    if (!this->f_.has_value())
+      return;
+    auto val = (*this->f_)();
+    if (!val.has_value())
+      return;
+    this->publish_state(*val);
+  }
+
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
   Trigger<float> *get_set_trigger() const { return set_trigger_; }
@@ -27,10 +36,25 @@ class TemplateNumber : public number::Number, public PollingComponent {
   bool optimistic_{false};
   float initial_value_{NAN};
   bool restore_value_{false};
-  Trigger<float> *set_trigger_ = new Trigger<float>();
-  optional<std::function<optional<float>()>> f_;
+  Trigger<float> *set_trigger_;
+  optional<F> f_;
 
   ESPPreferenceObject pref_;
+};
+
+class TemplateNumber : public TemplateNumberBase<std::function<optional<float>()>> {
+ public:
+  void set_template(std::function<optional<float>()> &&f) { this->f_ = f; }
+};
+
+/** Optimized template number for stateless lambdas (no capture).
+ *
+ * Uses function pointer instead of std::function to reduce memory overhead.
+ * Memory: 4 bytes (function pointer on 32-bit) vs 32 bytes (std::function).
+ */
+class StatelessTemplateNumber : public TemplateNumberBase<optional<float> (*)()> {
+ public:
+  explicit StatelessTemplateNumber(optional<float> (*f)()) { this->f_ = f; }
 };
 
 }  // namespace template_

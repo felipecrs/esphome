@@ -8,14 +8,8 @@ using namespace esphome::cover;
 
 static const char *const TAG = "template.cover";
 
-TemplateCover::TemplateCover()
-    : open_trigger_(new Trigger<>()),
-      close_trigger_(new Trigger<>),
-      stop_trigger_(new Trigger<>()),
-      toggle_trigger_(new Trigger<>()),
-      position_trigger_(new Trigger<float>()),
-      tilt_trigger_(new Trigger<float>()) {}
-void TemplateCover::setup() {
+// Template instantiations
+template<typename StateF, typename TiltF> void TemplateCoverBase<StateF, TiltF>::setup() {
   switch (this->restore_mode_) {
     case COVER_NO_RESTORE:
       break;
@@ -34,43 +28,12 @@ void TemplateCover::setup() {
     }
   }
 }
-void TemplateCover::loop() {
-  bool changed = false;
 
-  if (this->state_f_.has_value()) {
-    auto s = (*this->state_f_)();
-    if (s.has_value()) {
-      auto pos = clamp(*s, 0.0f, 1.0f);
-      if (pos != this->position) {
-        this->position = pos;
-        changed = true;
-      }
-    }
-  }
-  if (this->tilt_f_.has_value()) {
-    auto s = (*this->tilt_f_)();
-    if (s.has_value()) {
-      auto tilt = clamp(*s, 0.0f, 1.0f);
-      if (tilt != this->tilt) {
-        this->tilt = tilt;
-        changed = true;
-      }
-    }
-  }
-
-  if (changed)
-    this->publish_state();
+template<typename StateF, typename TiltF> void TemplateCoverBase<StateF, TiltF>::dump_config() {
+  LOG_COVER("", "Template Cover", this);
 }
-void TemplateCover::set_optimistic(bool optimistic) { this->optimistic_ = optimistic; }
-void TemplateCover::set_assumed_state(bool assumed_state) { this->assumed_state_ = assumed_state; }
-void TemplateCover::set_state_lambda(std::function<optional<float>()> &&f) { this->state_f_ = f; }
-float TemplateCover::get_setup_priority() const { return setup_priority::HARDWARE; }
-Trigger<> *TemplateCover::get_open_trigger() const { return this->open_trigger_; }
-Trigger<> *TemplateCover::get_close_trigger() const { return this->close_trigger_; }
-Trigger<> *TemplateCover::get_stop_trigger() const { return this->stop_trigger_; }
-Trigger<> *TemplateCover::get_toggle_trigger() const { return this->toggle_trigger_; }
-void TemplateCover::dump_config() { LOG_COVER("", "Template Cover", this); }
-void TemplateCover::control(const CoverCall &call) {
+
+template<typename StateF, typename TiltF> void TemplateCoverBase<StateF, TiltF>::control(const CoverCall &call) {
   if (call.get_stop()) {
     this->stop_prev_trigger_();
     this->stop_trigger_->trigger();

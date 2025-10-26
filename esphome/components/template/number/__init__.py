@@ -19,6 +19,9 @@ from .. import template_ns
 TemplateNumber = template_ns.class_(
     "TemplateNumber", number.Number, cg.PollingComponent
 )
+StatelessTemplateNumber = template_ns.class_(
+    "StatelessTemplateNumber", number.Number, cg.PollingComponent
+)
 
 
 def validate_min_max(config):
@@ -66,23 +69,33 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await number.register_number(
-        var,
-        config,
-        min_value=config[CONF_MIN_VALUE],
-        max_value=config[CONF_MAX_VALUE],
-        step=config[CONF_STEP],
-    )
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateNumber or StatelessTemplateNumber
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(float)
         )
-        cg.add(var.set_template(template_))
-
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateNumber
+        )
+        await cg.register_component(var, config)
+        await number.register_number(
+            var,
+            config,
+            min_value=config[CONF_MIN_VALUE],
+            max_value=config[CONF_MAX_VALUE],
+            step=config[CONF_STEP],
+        )
     else:
+        # No lambda - just create the base template number
+        var = cg.new_Pvariable(config[CONF_ID])
+        await cg.register_component(var, config)
+        await number.register_number(
+            var,
+            config,
+            min_value=config[CONF_MIN_VALUE],
+            max_value=config[CONF_MAX_VALUE],
+            step=config[CONF_STEP],
+        )
         cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
         cg.add(var.set_initial_value(config[CONF_INITIAL_VALUE]))
         if CONF_RESTORE_VALUE in config:

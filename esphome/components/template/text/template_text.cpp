@@ -6,7 +6,8 @@ namespace template_ {
 
 static const char *const TAG = "template.text";
 
-void TemplateText::setup() {
+// Template instantiations
+template<typename F> void TemplateTextBase<F>::setup() {
   if (!(this->f_ == nullptr)) {
     if (this->f_.has_value())
       return;
@@ -25,21 +26,7 @@ void TemplateText::setup() {
     this->publish_state(value);
 }
 
-void TemplateText::update() {
-  if (this->f_ == nullptr)
-    return;
-
-  if (!this->f_.has_value())
-    return;
-
-  auto val = (*this->f_)();
-  if (!val.has_value())
-    return;
-
-  this->publish_state(*val);
-}
-
-void TemplateText::control(const std::string &value) {
+template<typename F> void TemplateTextBase<F>::control(const std::string &value) {
   this->set_trigger_->trigger(value);
 
   if (this->optimistic_)
@@ -51,11 +38,15 @@ void TemplateText::control(const std::string &value) {
     }
   }
 }
-void TemplateText::dump_config() {
+
+template<typename F> void TemplateTextBase<F>::dump_config() {
   LOG_TEXT("", "Template Text Input", this);
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   LOG_UPDATE_INTERVAL(this);
 }
+
+template class TemplateTextBase<std::function<optional<std::string>()>>;
+template class TemplateTextBase<optional<std::string> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

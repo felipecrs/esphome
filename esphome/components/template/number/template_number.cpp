@@ -6,7 +6,8 @@ namespace template_ {
 
 static const char *const TAG = "template.number";
 
-void TemplateNumber::setup() {
+// Template instantiations
+template<typename F> void TemplateNumberBase<F>::setup() {
   if (this->f_.has_value())
     return;
 
@@ -26,18 +27,7 @@ void TemplateNumber::setup() {
   this->publish_state(value);
 }
 
-void TemplateNumber::update() {
-  if (!this->f_.has_value())
-    return;
-
-  auto val = (*this->f_)();
-  if (!val.has_value())
-    return;
-
-  this->publish_state(*val);
-}
-
-void TemplateNumber::control(float value) {
+template<typename F> void TemplateNumberBase<F>::control(float value) {
   this->set_trigger_->trigger(value);
 
   if (this->optimistic_)
@@ -46,11 +36,15 @@ void TemplateNumber::control(float value) {
   if (this->restore_value_)
     this->pref_.save(&value);
 }
-void TemplateNumber::dump_config() {
+
+template<typename F> void TemplateNumberBase<F>::dump_config() {
   LOG_NUMBER("", "Template Number", this);
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   LOG_UPDATE_INTERVAL(this);
 }
+
+template class TemplateNumberBase<std::function<optional<float>()>>;
+template class TemplateNumberBase<optional<float> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

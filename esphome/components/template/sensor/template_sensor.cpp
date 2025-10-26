@@ -7,21 +7,14 @@ namespace template_ {
 
 static const char *const TAG = "template.sensor";
 
-void TemplateSensor::update() {
-  if (!this->f_.has_value())
-    return;
-
-  auto val = (*this->f_)();
-  if (val.has_value()) {
-    this->publish_state(*val);
-  }
-}
-float TemplateSensor::get_setup_priority() const { return setup_priority::HARDWARE; }
-void TemplateSensor::set_template(std::function<optional<float>()> &&f) { this->f_ = f; }
-void TemplateSensor::dump_config() {
+// Template instantiations
+template<typename F> void TemplateSensorBase<F>::dump_config() {
   LOG_SENSOR("", "Template Sensor", this);
   LOG_UPDATE_INTERVAL(this);
 }
+
+template class TemplateSensorBase<std::function<optional<float>()>>;
+template class TemplateSensorBase<optional<float> (*)()>;
 
 }  // namespace template_
 }  // namespace esphome

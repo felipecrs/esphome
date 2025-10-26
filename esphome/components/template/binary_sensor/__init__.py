@@ -10,6 +10,9 @@ from .. import template_ns
 TemplateBinarySensor = template_ns.class_(
     "TemplateBinarySensor", binary_sensor.BinarySensor, cg.Component
 )
+StatelessTemplateBinarySensor = template_ns.class_(
+    "StatelessTemplateBinarySensor", binary_sensor.BinarySensor, cg.Component
+)
 
 CONFIG_SCHEMA = (
     binary_sensor.binary_sensor_schema(TemplateBinarySensor)
@@ -26,15 +29,22 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    var = await binary_sensor.new_binary_sensor(config)
-    await cg.register_component(var, config)
-
+    # Check if we have a lambda first - determines which class to instantiate
     if lamb := config.get(CONF_LAMBDA):
+        # Use new_lambda_pvariable to create either TemplateBinarySensor or StatelessTemplateBinarySensor
         template_ = await cg.process_lambda(
             lamb, [], return_type=cg.optional.template(bool)
         )
-        cg.add(var.set_template(template_))
-    if condition := config.get(CONF_CONDITION):
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateBinarySensor
+        )
+        # Manually register as binary sensor since we didn't use new_binary_sensor
+        await binary_sensor.register_binary_sensor(var, config)
+        await cg.register_component(var, config)
+    elif condition := config.get(CONF_CONDITION):
+        # For conditions, create stateful version and set template
+        var = await binary_sensor.new_binary_sensor(config)
+        await cg.register_component(var, config)
         condition = await automation.build_condition(
             condition, cg.TemplateArguments(), []
         )
@@ -42,6 +52,10 @@ async def to_code(config):
             f"return {condition.check()};", [], return_type=cg.optional.template(bool)
         )
         cg.add(var.set_template(template_))
+    else:
+        # No lambda or condition - just create the base template sensor
+        var = await binary_sensor.new_binary_sensor(config)
+        await cg.register_component(var, config)
 
 
 @automation.register_action(

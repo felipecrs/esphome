@@ -17,6 +17,9 @@ from .. import template_ns
 TemplateSelect = template_ns.class_(
     "TemplateSelect", select.Select, cg.PollingComponent
 )
+StatelessTemplateSelect = template_ns.class_(
+    "StatelessTemplateSelect", select.Select, cg.PollingComponent
+)
 
 
 def validate(config):
@@ -62,17 +65,22 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await select.register_select(var, config, options=config[CONF_OPTIONS])
-
     if CONF_LAMBDA in config:
+        # Use new_lambda_pvariable to create either TemplateSelect or StatelessTemplateSelect
         template_ = await cg.process_lambda(
             config[CONF_LAMBDA], [], return_type=cg.optional.template(cg.std_string)
         )
-        cg.add(var.set_template(template_))
-
+        var = automation.new_lambda_pvariable(
+            config[CONF_ID], template_, StatelessTemplateSelect
+        )
+        await cg.register_component(var, config)
+        await select.register_select(var, config, options=config[CONF_OPTIONS])
     else:
+        # No lambda - just create the base template select
+        var = cg.new_Pvariable(config[CONF_ID])
+        await cg.register_component(var, config)
+        await select.register_select(var, config, options=config[CONF_OPTIONS])
+
         # Only set if non-default to avoid bloating setup() function
         if config[CONF_OPTIMISTIC]:
             cg.add(var.set_optimistic(True))
