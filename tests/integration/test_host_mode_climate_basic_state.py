@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import aioesphomeapi
-from aioesphomeapi import ClimateAction, ClimateInfo, ClimateMode, ClimatePreset
+from aioesphomeapi import ClimateAction, ClimateMode, ClimatePreset, EntityState
 import pytest
 
-from .state_utils import InitialStateHelper
 from .types import APIClientConnectedFactory, RunCompiledFunction
 
 
@@ -17,27 +18,26 @@ async def test_host_mode_climate_basic_state(
     api_client_connected: APIClientConnectedFactory,
 ) -> None:
     """Test basic climate state reporting."""
+    loop = asyncio.get_running_loop()
     async with run_compiled(yaml_config), api_client_connected() as client:
-        # Get entities and set up state synchronization
-        entities, services = await client.list_entities_services()
-        initial_state_helper = InitialStateHelper(entities)
-        climate_infos = [e for e in entities if isinstance(e, ClimateInfo)]
-        assert len(climate_infos) >= 1, "Expected at least 1 climate entity"
+        states: dict[int, EntityState] = {}
+        climate_future: asyncio.Future[EntityState] = loop.create_future()
 
-        # Subscribe with the wrapper (no-op callback since we just want initial states)
-        client.subscribe_states(initial_state_helper.on_state_wrapper(lambda _: None))
+        def on_state(state: EntityState) -> None:
+            states[state.key] = state
+            if (
+                isinstance(state, aioesphomeapi.ClimateState)
+                and not climate_future.done()
+            ):
+                climate_future.set_result(state)
 
-        # Wait for all initial states to be broadcast
+        client.subscribe_states(on_state)
+
         try:
-            await initial_state_helper.wait_for_initial_states()
+            climate_state = await asyncio.wait_for(climate_future, timeout=5.0)
         except TimeoutError:
-            pytest.fail("Timeout waiting for initial states")
+            pytest.fail("Climate state not received within 5 seconds")
 
-        # Get the climate entity and its initial state
-        test_climate = climate_infos[0]
-        climate_state = initial_state_helper.initial_states.get(test_climate.key)
-
-        assert climate_state is not None, "Climate initial state not found"
         assert isinstance(climate_state, aioesphomeapi.ClimateState)
         assert climate_state.mode == ClimateMode.OFF
         assert climate_state.action == ClimateAction.OFF
