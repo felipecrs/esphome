@@ -339,7 +339,7 @@ class ProtoWriteBuffer {
     if (value == 0 && !force)
       return;
     this->encode_field_raw(field_id, 0);  // type 0: Varint - uint64
-    this->encode_varint(ProtoVarInt(value));
+    this->encode_varint(value);
   }
   void encode_bool(uint32_t field_id, bool value, bool force = false) {
     if (!value && !force)
