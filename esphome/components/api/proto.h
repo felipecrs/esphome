@@ -213,6 +213,9 @@ class Proto32Bit {
 
 // NOTE: Proto64Bit class removed - wire type 1 (64-bit fixed) not supported
 
+// Forward declaration for ProtoSize (defined later in file)
+class ProtoSize;
+
 class ProtoWriteBuffer {
  public:
   ProtoWriteBuffer(std::vector<uint8_t> *buffer) : buffer_(buffer) {}
@@ -250,11 +253,8 @@ class ProtoWriteBuffer {
       return;
     }
 
-    // Rare case: 4-10 byte values - use CLZ to calculate size
-    // Value is guaranteed >= (1ULL << 21), so CLZ is safe (non-zero)
-    uint32_t bits = 64 - __builtin_clzll(value);
-    uint32_t size = (bits + 6) / 7;
-
+    // Rare case: 4-10 byte values - delegate to ProtoSize to calculate size
+    uint32_t size = ProtoSize::varint(value);
     buffer->resize(start + size);
     p = buffer->data() + start;
     size_t bytes = 0;
@@ -479,7 +479,12 @@ class ProtoSize {
       return varint(static_cast<uint32_t>(value));
     }
 
-    // For larger values, determine size based on highest bit position
+    // For larger values, calculate size from number of significant bits: ceil(bits / 7)
+#if defined(__GNUC__) || defined(__clang__)
+    // Use compiler intrinsic for efficient bit position lookup
+    return (64 - __builtin_clzll(value) + 6) / 7;
+#else
+    // Fallback for compilers without __builtin_clzll
     if (value < (1ULL << 35)) {
       return 5;  // 35 bits
     } else if (value < (1ULL << 42)) {
@@ -493,6 +498,7 @@ class ProtoSize {
     } else {
       return 10;  // 64 bits (maximum for uint64_t)
     }
+#endif
   }
 
   /**
