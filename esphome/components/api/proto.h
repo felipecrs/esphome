@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 #ifdef ESPHOME_LOG_HAS_VERY_VERBOSE
@@ -289,11 +290,9 @@ class ProtoWriteBuffer {
   void encode_varint(uint32_t value) { this->encode_varint(static_cast<uint64_t>(value)); }
 
   // size_t overload (only enabled if size_t is distinct from uint32_t and uint64_t)
-  template<typename T,
-           typename std::enable_if<std::is_same<T, size_t>::value && !std::is_same<size_t, uint32_t>::value &&
-                                       !std::is_same<size_t, uint64_t>::value,
-                                   int>::type = 0>
-  void encode_varint(T value) {
+  template<typename T>
+  requires std::is_same_v<T, size_t> && !std::is_same_v<size_t, uint32_t> &&
+      !std::is_same_v<size_t, uint64_t> void encode_varint(T value) {
     this->encode_varint(static_cast<uint64_t>(value));
   }
 
