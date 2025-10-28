@@ -291,8 +291,8 @@ class ProtoWriteBuffer {
 
   // size_t overload (only enabled if size_t is distinct from uint32_t and uint64_t)
   template<typename T>
-  requires(std::is_same_v<T, size_t> && !std::is_same_v<size_t, uint32_t> &&
-           !std::is_same_v<size_t, uint64_t>) void encode_varint(T value) {
+  void encode_varint(T value) requires(std::is_same_v<T, size_t> && !std::is_same_v<size_t, uint32_t> &&
+                                       !std::is_same_v<size_t, uint64_t>) {
     this->encode_varint(static_cast<uint64_t>(value));
   }
 
