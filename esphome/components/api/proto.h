@@ -213,9 +213,6 @@ class Proto32Bit {
 
 // NOTE: Proto64Bit class removed - wire type 1 (64-bit fixed) not supported
 
-// Forward declaration for ProtoSize (defined later in file)
-class ProtoSize;
-
 class ProtoWriteBuffer {
  public:
   ProtoWriteBuffer(std::vector<uint8_t> *buffer) : buffer_(buffer) {}
@@ -226,7 +223,7 @@ class ProtoWriteBuffer {
     auto buffer = this->buffer_;
     size_t start = buffer->size();
 
-    // Fast paths for common cases (1-4 bytes) - inline encoding avoids loop overhead
+    // Fast paths for common cases (1-3 bytes)
     if (value < (1ULL << 7)) {
       // 1 byte - very common for field IDs and small lengths
       buffer->resize(start + 1);
@@ -236,7 +233,7 @@ class ProtoWriteBuffer {
 
     uint8_t *p;
     if (value < (1ULL << 14)) {
-      // 2 bytes
+      // 2 bytes - common for medium field IDs and lengths
       buffer->resize(start + 2);
       p = buffer->data() + start;
       p[0] = (value & 0x7F) | 0x80;
@@ -244,7 +241,7 @@ class ProtoWriteBuffer {
       return;
     }
     if (value < (1ULL << 21)) {
-      // 3 bytes
+      // 3 bytes - rare
       buffer->resize(start + 3);
       p = buffer->data() + start;
       p[0] = (value & 0x7F) | 0x80;
@@ -253,8 +250,31 @@ class ProtoWriteBuffer {
       return;
     }
 
-    // Rare case: 4-10 byte values - delegate to ProtoSize to calculate size
-    uint32_t size = ProtoSize::varint(value);
+    // Rare case: 4-10 byte values - calculate size from bit position
+    // Value is guaranteed >= (1ULL << 21), so CLZ is safe (non-zero)
+    uint32_t size;
+#if defined(__GNUC__) || defined(__clang__)
+    // Use compiler intrinsic for efficient bit position lookup
+    size = (64 - __builtin_clzll(value) + 6) / 7;
+#else
+    // Fallback for compilers without __builtin_clzll
+    if (value < (1ULL << 28)) {
+      size = 4;
+    } else if (value < (1ULL << 35)) {
+      size = 5;
+    } else if (value < (1ULL << 42)) {
+      size = 6;
+    } else if (value < (1ULL << 49)) {
+      size = 7;
+    } else if (value < (1ULL << 56)) {
+      size = 8;
+    } else if (value < (1ULL << 63)) {
+      size = 9;
+    } else {
+      size = 10;
+    }
+#endif
+
     buffer->resize(start + size);
     p = buffer->data() + start;
     size_t bytes = 0;
@@ -479,12 +499,8 @@ class ProtoSize {
       return varint(static_cast<uint32_t>(value));
     }
 
-    // For larger values, calculate size from number of significant bits: ceil(bits / 7)
-#if defined(__GNUC__) || defined(__clang__)
-    // Use compiler intrinsic for efficient bit position lookup
-    return (64 - __builtin_clzll(value) + 6) / 7;
-#else
-    // Fallback for compilers without __builtin_clzll
+    // For larger values, use simple ladder (constexpr-friendly)
+    // Note: encode_varint_raw uses CLZ for runtime performance, but this is rarely called
     if (value < (1ULL << 35)) {
       return 5;  // 35 bits
     } else if (value < (1ULL << 42)) {
@@ -498,7 +514,6 @@ class ProtoSize {
     } else {
       return 10;  // 64 bits (maximum for uint64_t)
     }
-#endif
   }
 
   /**
