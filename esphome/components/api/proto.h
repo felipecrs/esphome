@@ -288,8 +288,14 @@ class ProtoWriteBuffer {
   // Common case: uint32_t values (field IDs, lengths, most integers)
   void encode_varint(uint32_t value) { this->encode_varint(static_cast<uint64_t>(value)); }
 
-  // size_t overload to avoid ambiguity on different platforms
-  void encode_varint(size_t value) { this->encode_varint(static_cast<uint64_t>(value)); }
+  // size_t overload (only enabled if size_t is distinct from uint32_t and uint64_t)
+  template<typename T,
+           typename std::enable_if<std::is_same<T, size_t>::value && !std::is_same<size_t, uint32_t>::value &&
+                                       !std::is_same<size_t, uint64_t>::value,
+                                   int>::type = 0>
+  void encode_varint(T value) {
+    this->encode_varint(static_cast<uint64_t>(value));
+  }
 
   // Rare case: ProtoVarInt wrapper
   void encode_varint(ProtoVarInt value) { this->encode_varint(value.as_uint64()); }
