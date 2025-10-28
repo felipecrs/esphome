@@ -159,22 +159,6 @@ class ProtoVarInt {
       }
     }
   }
-  void encode(std::vector<uint8_t> &out) {
-    uint64_t val = this->value_;
-    if (val <= 0x7F) {
-      out.push_back(val);
-      return;
-    }
-    while (val) {
-      uint8_t temp = val & 0x7F;
-      val >>= 7;
-      if (val) {
-        out.push_back(temp | 0x80);
-      } else {
-        out.push_back(temp);
-      }
-    }
-  }
 
  protected:
   uint64_t value_;
@@ -233,8 +217,77 @@ class ProtoWriteBuffer {
  public:
   ProtoWriteBuffer(std::vector<uint8_t> *buffer) : buffer_(buffer) {}
   void write(uint8_t value) { this->buffer_->push_back(value); }
-  void encode_varint_raw(ProtoVarInt value) { value.encode(*this->buffer_); }
-  void encode_varint_raw(uint32_t value) { this->encode_varint_raw(ProtoVarInt(value)); }
+
+  // Single implementation that all overloads delegate to
+  void encode_varint_raw(uint64_t value) {
+    size_t start = this->buffer_->size();
+    uint8_t *p;
+
+    // Optimize for common small values - calculate size upfront to avoid double resize
+    if (value < 128) {
+      // 1 byte - very common for field IDs and small lengths
+      this->buffer_->resize(start + 1);
+      this->buffer_->data()[start] = static_cast<uint8_t>(value);
+      return;
+    } else if (value < 16384) {
+      // 2 bytes
+      this->buffer_->resize(start + 2);
+      p = this->buffer_->data() + start;
+      p[0] = (value & 0x7F) | 0x80;
+      p[1] = (value >> 7) & 0x7F;
+      return;
+    } else if (value < 2097152) {
+      // 3 bytes
+      this->buffer_->resize(start + 3);
+      p = this->buffer_->data() + start;
+      p[0] = (value & 0x7F) | 0x80;
+      p[1] = ((value >> 7) & 0x7F) | 0x80;
+      p[2] = (value >> 14) & 0x7F;
+      return;
+    } else if (value < 268435456) {
+      // 4 bytes
+      this->buffer_->resize(start + 4);
+      p = this->buffer_->data() + start;
+      p[0] = (value & 0x7F) | 0x80;
+      p[1] = ((value >> 7) & 0x7F) | 0x80;
+      p[2] = ((value >> 14) & 0x7F) | 0x80;
+      p[3] = (value >> 21) & 0x7F;
+      return;
+    }
+
+    // Rare case: 5-10 byte values - calculate size, single resize, loop encode
+    // We know value >= 268435456, so skip checks for 1-4 bytes
+    uint32_t size;
+    if (value < (1ULL << 35)) {
+      size = 5;
+    } else if (value < (1ULL << 42)) {
+      size = 6;
+    } else if (value < (1ULL << 49)) {
+      size = 7;
+    } else if (value < (1ULL << 56)) {
+      size = 8;
+    } else if (value < (1ULL << 63)) {
+      size = 9;
+    } else {
+      size = 10;
+    }
+
+    this->buffer_->resize(start + size);
+    p = this->buffer_->data() + start;
+
+    size_t bytes = 0;
+    while (value) {
+      uint8_t temp = value & 0x7F;
+      value >>= 7;
+      p[bytes++] = value ? temp | 0x80 : temp;
+    }
+  }
+
+  // Common case: uint32_t values (field IDs, lengths, most integers)
+  void encode_varint_raw(uint32_t value) { this->encode_varint_raw(static_cast<uint64_t>(value)); }
+
+  // Rare case: ProtoVarInt wrapper
+  void encode_varint_raw(ProtoVarInt value) { this->encode_varint_raw(value.as_uint64()); }
   /**
    * Encode a field key (tag/wire type combination).
    *
