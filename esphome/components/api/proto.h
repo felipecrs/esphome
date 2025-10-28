@@ -260,22 +260,10 @@ class ProtoWriteBuffer {
       return;
     }
 
-    // Rare case: 5-10 byte values - calculate size, single resize, loop encode
-    // We know value >= 268435456, so skip checks for 1-4 bytes
-    uint32_t size;
-    if (value < (1ULL << 35)) {
-      size = 5;
-    } else if (value < (1ULL << 42)) {
-      size = 6;
-    } else if (value < (1ULL << 49)) {
-      size = 7;
-    } else if (value < (1ULL << 56)) {
-      size = 8;
-    } else if (value < (1ULL << 63)) {
-      size = 9;
-    } else {
-      size = 10;
-    }
+    // Rare case: 5-10 byte values - use CLZ to calculate size
+    // Value is guaranteed >= 268435456, so CLZ is safe (non-zero)
+    uint32_t bits = 64 - __builtin_clzll(value);
+    uint32_t size = (bits + 6) / 7;
 
     buffer->resize(start + size);
     p = buffer->data() + start;
