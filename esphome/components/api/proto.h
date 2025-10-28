@@ -219,7 +219,7 @@ class ProtoWriteBuffer {
   void write(uint8_t value) { this->buffer_->push_back(value); }
 
   // Single implementation that all overloads delegate to
-  void encode_varint_raw(uint64_t value) {
+  void encode_varint(uint64_t value) {
     auto buffer = this->buffer_;
     size_t start = buffer->size();
 
@@ -286,10 +286,10 @@ class ProtoWriteBuffer {
   }
 
   // Common case: uint32_t values (field IDs, lengths, most integers)
-  void encode_varint_raw(uint32_t value) { this->encode_varint_raw(static_cast<uint64_t>(value)); }
+  void encode_varint(uint32_t value) { this->encode_varint(static_cast<uint64_t>(value)); }
 
   // Rare case: ProtoVarInt wrapper
-  void encode_varint_raw(ProtoVarInt value) { this->encode_varint_raw(value.as_uint64()); }
+  void encode_varint(ProtoVarInt value) { this->encode_varint(value.as_uint64()); }
   /**
    * Encode a field key (tag/wire type combination).
    *
@@ -304,14 +304,14 @@ class ProtoWriteBuffer {
    */
   void encode_field_raw(uint32_t field_id, uint32_t type) {
     uint32_t val = (field_id << 3) | (type & WIRE_TYPE_MASK);
-    this->encode_varint_raw(val);
+    this->encode_varint(val);
   }
   void encode_string(uint32_t field_id, const char *string, size_t len, bool force = false) {
     if (len == 0 && !force)
       return;
 
     this->encode_field_raw(field_id, 2);  // type 2: Length-delimited string
-    this->encode_varint_raw(len);
+    this->encode_varint(len);
 
     // Using resize + memcpy instead of insert provides significant performance improvement:
     // ~10-11x faster for 16-32 byte strings, ~3x faster for 64-byte strings
@@ -333,13 +333,13 @@ class ProtoWriteBuffer {
     if (value == 0 && !force)
       return;
     this->encode_field_raw(field_id, 0);  // type 0: Varint - uint32
-    this->encode_varint_raw(value);
+    this->encode_varint(value);
   }
   void encode_uint64(uint32_t field_id, uint64_t value, bool force = false) {
     if (value == 0 && !force)
       return;
     this->encode_field_raw(field_id, 0);  // type 0: Varint - uint64
-    this->encode_varint_raw(ProtoVarInt(value));
+    this->encode_varint(ProtoVarInt(value));
   }
   void encode_bool(uint32_t field_id, bool value, bool force = false) {
     if (!value && !force)
