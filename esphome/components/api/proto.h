@@ -223,7 +223,7 @@ class ProtoWriteBuffer {
     size_t start = this->buffer_->size();
 
     // Fast paths for common cases (1-4 bytes) - inline encoding avoids loop overhead
-    if (value < 128) {
+    if (value < (1ULL << 7)) {
       // 1 byte - very common for field IDs and small lengths
       this->buffer_->resize(start + 1);
       this->buffer_->data()[start] = static_cast<uint8_t>(value);
@@ -231,7 +231,7 @@ class ProtoWriteBuffer {
     }
 
     uint8_t *p;
-    if (value < 16384) {
+    if (value < (1ULL << 14)) {
       // 2 bytes
       this->buffer_->resize(start + 2);
       p = this->buffer_->data() + start;
@@ -239,7 +239,7 @@ class ProtoWriteBuffer {
       p[1] = (value >> 7) & 0x7F;
       return;
     }
-    if (value < 2097152) {
+    if (value < (1ULL << 21)) {
       // 3 bytes
       this->buffer_->resize(start + 3);
       p = this->buffer_->data() + start;
@@ -248,7 +248,7 @@ class ProtoWriteBuffer {
       p[2] = (value >> 14) & 0x7F;
       return;
     }
-    if (value < 268435456) {
+    if (value < (1ULL << 28)) {
       // 4 bytes
       this->buffer_->resize(start + 4);
       p = this->buffer_->data() + start;
