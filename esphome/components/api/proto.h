@@ -488,6 +488,34 @@ class ProtoSize {
   }
 
   /**
+   * @brief Calculates the size in bytes needed to encode a uint64_t value as a varint
+   *
+   * @param value The uint64_t value to calculate size for
+   * @return The number of bytes needed to encode the value
+   */
+  static constexpr uint32_t varint(uint64_t value) {
+    // Most uint64 values fit in uint32 range (field IDs, lengths, etc.)
+    if (value <= UINT32_MAX) {
+      return varint(static_cast<uint32_t>(value));
+    }
+
+    // True 64-bit values (bluetooth addresses, UUIDs)
+    if (value < (1ULL << 35)) {
+      return 5;
+    } else if (value < (1ULL << 42)) {
+      return 6;
+    } else if (value < (1ULL << 49)) {
+      return 7;
+    } else if (value < (1ULL << 56)) {
+      return 8;
+    } else if (value < (1ULL << 63)) {
+      return 9;
+    } else {
+      return 10;
+    }
+  }
+
+  /**
    * @brief Calculates the size in bytes needed to encode an int32_t value as a varint
    *
    * Special handling is needed for negative values, which are sign-extended to 64 bits
