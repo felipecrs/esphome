@@ -220,13 +220,14 @@ class ProtoWriteBuffer {
 
   // Single implementation that all overloads delegate to
   void encode_varint_raw(uint64_t value) {
-    size_t start = this->buffer_->size();
-    uint8_t *data = this->buffer_->data();
+    auto buffer = this->buffer_;
+    size_t start = buffer->size();
+    uint8_t *data = buffer->data();
 
     // Fast paths for common cases (1-4 bytes) - inline encoding avoids loop overhead
     if (value < (1ULL << 7)) {
       // 1 byte - very common for field IDs and small lengths
-      this->buffer_->resize(start + 1);
+      buffer->resize(start + 1);
       data[start] = static_cast<uint8_t>(value);
       return;
     }
@@ -234,7 +235,7 @@ class ProtoWriteBuffer {
     uint8_t *p;
     if (value < (1ULL << 14)) {
       // 2 bytes
-      this->buffer_->resize(start + 2);
+      buffer->resize(start + 2);
       p = data + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = (value >> 7) & 0x7F;
@@ -242,7 +243,7 @@ class ProtoWriteBuffer {
     }
     if (value < (1ULL << 21)) {
       // 3 bytes
-      this->buffer_->resize(start + 3);
+      buffer->resize(start + 3);
       p = data + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = ((value >> 7) & 0x7F) | 0x80;
@@ -251,7 +252,7 @@ class ProtoWriteBuffer {
     }
     if (value < (1ULL << 28)) {
       // 4 bytes
-      this->buffer_->resize(start + 4);
+      buffer->resize(start + 4);
       p = data + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = ((value >> 7) & 0x7F) | 0x80;
@@ -277,7 +278,7 @@ class ProtoWriteBuffer {
       size = 10;
     }
 
-    this->buffer_->resize(start + size);
+    buffer->resize(start + size);
     p = data + start;
     size_t bytes = 0;
     while (value) {
