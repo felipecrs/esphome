@@ -229,11 +229,10 @@ class ProtoWriteBuffer {
       this->buffer_->data()[start] = static_cast<uint8_t>(value);
       return;
     }
-    uint8_t *p;
+    uint8_t *p = this->buffer_->data() + start;
     if (value < 16384) {
       // 2 bytes
       this->buffer_->resize(start + 2);
-      p = this->buffer_->data() + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = (value >> 7) & 0x7F;
       return;
@@ -241,7 +240,6 @@ class ProtoWriteBuffer {
     if (value < 2097152) {
       // 3 bytes
       this->buffer_->resize(start + 3);
-      p = this->buffer_->data() + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = ((value >> 7) & 0x7F) | 0x80;
       p[2] = (value >> 14) & 0x7F;
@@ -250,7 +248,6 @@ class ProtoWriteBuffer {
     if (value < 268435456) {
       // 4 bytes
       this->buffer_->resize(start + 4);
-      p = this->buffer_->data() + start;
       p[0] = (value & 0x7F) | 0x80;
       p[1] = ((value >> 7) & 0x7F) | 0x80;
       p[2] = ((value >> 14) & 0x7F) | 0x80;
@@ -276,7 +273,6 @@ class ProtoWriteBuffer {
     }
 
     this->buffer_->resize(start + size);
-    p = this->buffer_->data() + start;
     size_t bytes = 0;
     while (value) {
       uint8_t temp = value & 0x7F;
