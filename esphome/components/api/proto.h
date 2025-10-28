@@ -229,6 +229,7 @@ class ProtoWriteBuffer {
       this->buffer_->data()[start] = static_cast<uint8_t>(value);
       return;
     }
+
     uint8_t *p = this->buffer_->data() + start;
     if (value < 16384) {
       // 2 bytes
