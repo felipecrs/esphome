@@ -188,8 +188,8 @@ async def test_scheduler_pool(
                 size = int(match.group(1))
                 max_pool_size = max(max_pool_size, size)
 
-        # Pool can grow up to its maximum of 5
-        assert max_pool_size <= 5, f"Pool grew beyond maximum ({max_pool_size})"
+        # Pool can grow up to its maximum of 16
+        assert max_pool_size <= 16, f"Pool grew beyond maximum ({max_pool_size})"
 
     # Log summary for debugging
     print("\nScheduler Pool Test Summary (Python Orchestrated):")

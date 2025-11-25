@@ -15,17 +15,20 @@ namespace esphome {
 static const char *const TAG = "scheduler";
 
 // Memory pool configuration constants
-// Pool size of 5 matches typical usage patterns (2-4 active timers)
-// - Minimal memory overhead (~250 bytes on ESP32)
-// - Sufficient for most configs with a couple sensors/components
-// - Still prevents heap fragmentation and allocation stalls
-// - Complex setups with many timers will just allocate beyond the pool
+// Pool can grow up to MAX_POOL_SIZE to handle burst scenarios (e.g., many sensors
+// with timeout filters receiving rapid updates). The pool periodically shrinks
+// back toward MIN_POOL_SIZE when usage is low to reclaim memory.
+// - MAX of 16 handles configs with many timeout-based filters without allocation stalls
+// - MIN of 4 keeps a small reserve for typical usage patterns
+// - Shrinking every 5 minutes prevents memory waste on simple configs
 // See https://github.com/esphome/backlog/issues/52
-static constexpr size_t MAX_POOL_SIZE = 5;
+static constexpr size_t MAX_POOL_SIZE = 16;
+static constexpr size_t MIN_POOL_SIZE = 4;
+// Shrink interval in milliseconds (5 minutes)
+static constexpr uint32_t POOL_SHRINK_INTERVAL_MS = 5 * 60 * 1000;
 
 // Maximum number of logically deleted (cancelled) items before forcing cleanup.
-// Set to 5 to match the pool size - when we have as many cancelled items as our
-// pool can hold, it's time to clean up and recycle them.
+// Value chosen based on testing to balance cleanup frequency vs overhead.
 static constexpr uint32_t MAX_LOGICALLY_DELETED_ITEMS = 5;
 // Half the 32-bit range - used to detect rollovers vs normal time progression
 static constexpr uint32_t HALF_MAX_UINT32 = std::numeric_limits<uint32_t>::max() / 2;
@@ -330,6 +333,21 @@ void HOT Scheduler::call(uint32_t now) {
 #ifndef ESPHOME_THREAD_SINGLE
   this->process_defer_queue_(now);
 #endif /* not ESPHOME_THREAD_SINGLE */
+
+  // Periodically shrink the pool if it's larger than needed
+  // Check uses subtraction to handle uint32_t wraparound correctly
+  if (now - this->last_pool_shrink_ >= POOL_SHRINK_INTERVAL_MS) {
+    this->last_pool_shrink_ = now;
+    // Shrink pool to max(high_watermark, MIN_POOL_SIZE)
+    size_t target_size = this->pool_high_watermark_ > MIN_POOL_SIZE ? this->pool_high_watermark_ : MIN_POOL_SIZE;
+    while (this->scheduler_item_pool_.size() > target_size) {
+      this->scheduler_item_pool_.pop_back();
+    }
+    // Actually release the memory
+    this->scheduler_item_pool_.shrink_to_fit();
+    // Reset watermark for next period
+    this->pool_high_watermark_ = static_cast<uint8_t>(this->scheduler_item_pool_.size());
+  }
 
   // Convert the fresh timestamp from main loop to 64-bit for scheduler operations
   const auto now_64 = this->millis_64_(now);  // 'now' from parameter - fresh from Application::loop()
@@ -759,6 +777,11 @@ void Scheduler::recycle_item_(std::unique_ptr<SchedulerItem> item) {
     // Clear dynamic name if any
     item->clear_dynamic_name();
     this->scheduler_item_pool_.push_back(std::move(item));
+    // Track high watermark for adaptive pool shrinking
+    uint8_t current_size = static_cast<uint8_t>(this->scheduler_item_pool_.size());
+    if (current_size > this->pool_high_watermark_) {
+      this->pool_high_watermark_ = current_size;
+    }
 #ifdef ESPHOME_DEBUG_SCHEDULER
     ESP_LOGD(TAG, "Recycled item to pool (pool size now: %zu)", this->scheduler_item_pool_.size());
 #endif
