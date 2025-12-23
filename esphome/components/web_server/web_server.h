@@ -36,33 +36,44 @@ extern const size_t ESPHOME_WEBSERVER_JS_INCLUDE_SIZE;
 namespace esphome {
 namespace web_server {
 
+/// Result of matching a URL against an entity
+struct EntityMatchResult {
+  bool matched;          ///< True if entity matched the URL
+  bool action_is_empty;  ///< True if no action in URL (or action field was used as entity name for 2-seg subdevice)
+};
+
 /// Internal helper struct that is used to parse incoming URLs
+/// Note: Length fields use uint8_t, so NAME_MAX_LENGTH in config_validation.py must stay < 255
 struct UrlMatch {
   const char *domain;  ///< Pointer to domain within URL, for example "sensor"
-  const char *id;      ///< Pointer to id within URL, for example "living_room_fan"
+  const char *id;      ///< Pointer to entity name/id within URL, for example "Temperature"
   const char *method;  ///< Pointer to method within URL, for example "turn_on"
+#ifdef USE_DEVICES
+  const char *device_name;  ///< Pointer to device name within URL, or nullptr for main device
+#endif
   uint8_t domain_len;  ///< Length of domain string
-  uint8_t id_len;      ///< Length of id string
+  uint8_t id_len;      ///< Length of id string (NAME_MAX_LENGTH must be < 255)
   uint8_t method_len;  ///< Length of method string
-  bool valid;          ///< Whether this match is valid
+#ifdef USE_DEVICES
+  uint8_t device_name_len;  ///< Length of device name string (NAME_MAX_LENGTH must be < 255)
+#endif
+  bool valid;  ///< Whether this match is valid
 
   // Helper methods for string comparisons
   bool domain_equals(const char *str) const {
     return domain && domain_len == strlen(str) && memcmp(domain, str, domain_len) == 0;
   }
 
-  bool id_equals_entity(EntityBase *entity) const {
-    // Get object_id with zero heap allocation
-    char object_id_buf[OBJECT_ID_MAX_LEN];
-    StringRef object_id = entity->get_object_id_to(object_id_buf);
-    return id && id_len == object_id.size() && memcmp(id, object_id.c_str(), id_len) == 0;
-  }
+  /// Check if URL id segment matches a string (by pointer and length)
+  bool id_matches(const char *str, size_t len) const { return id && id_len == len && memcmp(id, str, len) == 0; }
+
+  /// Match entity by name first, then fall back to object_id with deprecation warning
+  /// Returns EntityMatchResult with match status and whether method is effectively empty
+  EntityMatchResult match_entity(EntityBase *entity) const;
 
   bool method_equals(const char *str) const {
     return method && method_len == strlen(str) && memcmp(method, str, method_len) == 0;
   }
-
-  bool method_empty() const { return method_len == 0; }
 };
 
 #ifdef USE_WEBSERVER_SORTING

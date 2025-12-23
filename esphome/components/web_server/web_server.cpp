@@ -53,8 +53,16 @@ static const char *const HEADER_CORS_ALLOW_PNA = "Access-Control-Allow-Private-N
 #endif
 
 // Parse URL and return match info
+// URL formats:
+//   /{domain}/{entity_name} - main device, no method
+//   /{domain}/{entity_name}/{method} - main device with method
+//   /{domain}/{device_name}/{entity_name}/{method} - sub-device with method (USE_DEVICES only)
 static UrlMatch match_url(const char *url_ptr, size_t url_len, bool only_domain) {
   UrlMatch match{};
+#ifdef USE_DEVICES
+  match.device_name = nullptr;
+  match.device_name_len = 0;
+#endif
 
   // URL must start with '/'
   if (url_len < 2 || url_ptr[0] != '/') {
@@ -81,32 +89,137 @@ static UrlMatch match_url(const char *url_ptr, size_t url_len, bool only_domain)
     return match;
   }
 
-  // Parse ID if present
+  // Parse remaining segments
   if (domain_end + 1 >= end) {
     return match;  // Nothing after domain slash
   }
 
-  const char *id_start = domain_end + 1;
-  const char *id_end = (const char *) memchr(id_start, '/', end - id_start);
+  // Find all remaining slashes to count segments
+  const char *seg1_start = domain_end + 1;
+  const char *seg1_end = (const char *) memchr(seg1_start, '/', end - seg1_start);
 
-  if (!id_end) {
-    // No more slashes, entire remaining string is ID
-    match.id = id_start;
-    match.id_len = end - id_start;
+  if (!seg1_end) {
+    // Only 1 segment after domain: /{domain}/{entity_name}
+    match.id = seg1_start;
+    match.id_len = end - seg1_start;
+    // Reject empty segment (e.g., "/sensor/")
+    if (match.id_len == 0) {
+      return UrlMatch{};
+    }
     return match;
   }
 
-  // Set ID
-  match.id = id_start;
-  match.id_len = id_end - id_start;
+  const char *seg2_start = seg1_end + 1;
+  const char *seg2_end = (seg2_start < end) ? (const char *) memchr(seg2_start, '/', end - seg2_start) : nullptr;
 
-  // Parse method if present
-  if (id_end + 1 < end) {
-    match.method = id_end + 1;
-    match.method_len = end - (id_end + 1);
+  if (!seg2_end) {
+    // 2 segments after domain: /{domain}/{X}/{Y}
+    // This is /{domain}/{entity_name}/{method} for main device
+    match.id = seg1_start;
+    match.id_len = seg1_end - seg1_start;
+    match.method = seg2_start;
+    match.method_len = end - seg2_start;
+    // Reject empty segments (e.g., "/sensor//turn_on" or "/sensor/temp/")
+    if (match.id_len == 0 || match.method_len == 0) {
+      return UrlMatch{};
+    }
+    return match;
   }
 
+#ifdef USE_DEVICES
+  // 3+ segments after domain: /{domain}/{device_name}/{entity_name}/{method}
+  const char *seg3_start = seg2_end + 1;
+  match.device_name = seg1_start;
+  match.device_name_len = seg1_end - seg1_start;
+  match.id = seg2_start;
+  match.id_len = seg2_end - seg2_start;
+  if (seg3_start < end) {
+    match.method = seg3_start;
+    match.method_len = end - seg3_start;
+  } else {
+    // No method segment - fields already zero-initialized by UrlMatch{}
+    match.method = nullptr;
+    match.method_len = 0;
+  }
+
+  // Reject empty segments (e.g., "/sensor//entity/turn_on" or "/sensor/device//turn_on")
+  if (match.device_name_len == 0 || match.id_len == 0 || (match.method != nullptr && match.method_len == 0)) {
+    return UrlMatch{};
+  }
+#else
+  // Without USE_DEVICES, reject URLs with 3+ segments (device paths not supported)
+  return UrlMatch{};
+#endif
+
   return match;
+}
+
+EntityMatchResult UrlMatch::match_entity(EntityBase *entity) const {
+  EntityMatchResult result{false, this->method_len == 0};
+
+#ifdef USE_DEVICES
+  Device *entity_device = entity->get_device();
+  bool url_has_device = (this->device_name_len > 0);
+  bool entity_has_device = (entity_device != nullptr);
+
+  if (url_has_device) {
+    // URL has explicit device segment (3+ segments) - must match device
+    if (!entity_has_device)
+      return result;
+    const char *entity_device_name = entity_device->get_name();
+    if (this->device_name_len != strlen(entity_device_name) ||
+        memcmp(this->device_name, entity_device_name, this->device_name_len) != 0)
+      return result;
+  } else if (entity_has_device) {
+    // Entity has device but URL has only 2 segments (id/method)
+    // Try interpreting as device/entity: id=device_name, method=entity_name
+    if (this->method_len == 0)
+      return result;  // Need 2 segments for this interpretation
+    const char *entity_device_name = entity_device->get_name();
+    if (this->id_len == strlen(entity_device_name) && memcmp(this->id, entity_device_name, this->id_len) == 0) {
+      const StringRef &name_ref = entity->get_name();
+      if (this->method_len == name_ref.size() && memcmp(this->method, name_ref.c_str(), this->method_len) == 0) {
+        // Matched: id=device, method=entity_name, so method is effectively empty
+        return {true, true};
+      }
+    }
+    return result;  // No match
+  }
+#endif
+
+  // Try matching by entity name (new format)
+  const StringRef &name_ref = entity->get_name();
+  if (this->id_matches(name_ref.c_str(), name_ref.size())) {
+    result.matched = true;
+    return result;
+  }
+
+  // Fall back to object_id (deprecated format)
+  char object_id_buf[OBJECT_ID_MAX_LEN];
+  StringRef object_id = entity->get_object_id_to(object_id_buf);
+  if (this->id_matches(object_id.c_str(), object_id.size())) {
+    result.matched = true;
+    // Log deprecation warning
+#ifdef USE_DEVICES
+    Device *device = entity->get_device();
+    if (device != nullptr) {
+      ESP_LOGW(TAG,
+               "Deprecated URL format: /%.*s/%.*s/%.*s - use entity name '/%.*s/%s/%s' instead. "
+               "Object ID URLs will be removed in 2026.7.0.",
+               this->domain_len, this->domain, this->device_name_len, this->device_name, this->id_len, this->id,
+               this->domain_len, this->domain, device->get_name(), entity->get_name().c_str());
+    } else
+#endif
+    {
+      ESP_LOGW(TAG,
+               "Deprecated URL format: /%.*s/%.*s - use entity name '/%.*s/%s' instead. "
+               "Object ID URLs will be removed in 2026.7.0.",
+               this->domain_len, this->domain, this->id_len, this->id, this->domain_len, this->domain,
+               entity->get_name().c_str());
+    }
+  }
+
+  return result;
 }
 
 #if !defined(USE_ESP32) && defined(USE_ARDUINO)
@@ -405,15 +518,53 @@ void WebServer::handle_js_request(AsyncWebServerRequest *request) {
 #endif
 
 // Helper functions to reduce code size by avoiding macro expansion
+// Build unique id as: {domain}/{device_name}/{entity_name} or {domain}/{entity_name}
+// Uses names (not object_id) to avoid UTF-8 collision issues
 static void set_json_id(JsonObject &root, EntityBase *obj, const char *prefix, JsonDetail start_config) {
-  char id_buf[160];  // prefix + dash + object_id (up to 128) + null
-  size_t len = strlen(prefix);
-  memcpy(id_buf, prefix, len);  // NOLINT(bugprone-not-null-terminated-result) - null added by write_object_id_to
-  id_buf[len++] = '-';
-  obj->write_object_id_to(id_buf + len, sizeof(id_buf) - len);
+  const StringRef &name = obj->get_name();
+  size_t prefix_len = strlen(prefix);
+  size_t name_len = name.size();
+
+#ifdef USE_DEVICES
+  Device *device = obj->get_device();
+  const char *device_name = device ? device->get_name() : nullptr;
+  size_t device_len = device_name ? strlen(device_name) : 0;
+#endif
+
+  // Build id into stack buffer - ArduinoJson copies the string
+  // Format: {prefix}/{device?}/{name}
+  // Buffer size guaranteed by schema validation (NAME_MAX_LENGTH=120):
+  //   With devices: domain(20) + "/" + device(120) + "/" + name(120) + null = 263, rounded up to 280 for safety margin
+  //   Without devices: domain(20) + "/" + name(120) + null = 142, rounded up to 150 for safety margin
+#ifdef USE_DEVICES
+  char id_buf[280];
+#else
+  char id_buf[150];
+#endif
+  char *p = id_buf;
+  memcpy(p, prefix, prefix_len);
+  p += prefix_len;
+  *p++ = '/';
+#ifdef USE_DEVICES
+  if (device_name) {
+    memcpy(p, device_name, device_len);
+    p += device_len;
+    *p++ = '/';
+  }
+#endif
+  memcpy(p, name.c_str(), name_len);
+  p[name_len] = '\0';
+
   root[ESPHOME_F("id")] = id_buf;
+
   if (start_config == DETAIL_ALL) {
-    root[ESPHOME_F("name")] = obj->get_name();
+    root[ESPHOME_F("domain")] = prefix;
+    root[ESPHOME_F("name")] = name;
+#ifdef USE_DEVICES
+    if (device_name) {
+      root[ESPHOME_F("device")] = device_name;
+    }
+#endif
     root[ESPHOME_F("icon")] = obj->get_icon_ref();
     root[ESPHOME_F("entity_category")] = obj->get_entity_category();
     bool is_disabled = obj->is_disabled_by_default();
@@ -452,10 +603,11 @@ void WebServer::on_sensor_update(sensor::Sensor *obj) {
 }
 void WebServer::handle_sensor_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (sensor::Sensor *obj : App.get_sensors()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
     // Note: request->method() is always HTTP_GET here (canHandle ensures this)
-    if (match.method_empty()) {
+    if (entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->sensor_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -498,10 +650,11 @@ void WebServer::on_text_sensor_update(text_sensor::TextSensor *obj) {
 }
 void WebServer::handle_text_sensor_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (text_sensor::TextSensor *obj : App.get_text_sensors()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
     // Note: request->method() is always HTTP_GET here (canHandle ensures this)
-    if (match.method_empty()) {
+    if (entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->text_sensor_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -540,10 +693,11 @@ void WebServer::on_switch_update(switch_::Switch *obj) {
 }
 void WebServer::handle_switch_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (switch_::Switch *obj : App.get_switches()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->switch_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -609,9 +763,10 @@ std::string WebServer::switch_json_(switch_::Switch *obj, bool value, JsonDetail
 #ifdef USE_BUTTON
 void WebServer::handle_button_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (button::Button *obj : App.get_buttons()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->button_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -653,10 +808,11 @@ void WebServer::on_binary_sensor_update(binary_sensor::BinarySensor *obj) {
 }
 void WebServer::handle_binary_sensor_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (binary_sensor::BinarySensor *obj : App.get_binary_sensors()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
     // Note: request->method() is always HTTP_GET here (canHandle ensures this)
-    if (match.method_empty()) {
+    if (entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->binary_sensor_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -694,10 +850,11 @@ void WebServer::on_fan_update(fan::Fan *obj) {
 }
 void WebServer::handle_fan_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (fan::Fan *obj : App.get_fans()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->fan_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -774,10 +931,11 @@ void WebServer::on_light_update(light::LightState *obj) {
 }
 void WebServer::handle_light_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (light::LightState *obj : App.get_lights()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->light_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -852,10 +1010,11 @@ void WebServer::on_cover_update(cover::Cover *obj) {
 }
 void WebServer::handle_cover_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (cover::Cover *obj : App.get_covers()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->cover_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -940,10 +1099,11 @@ void WebServer::on_number_update(number::Number *obj) {
 }
 void WebServer::handle_number_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_numbers()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->number_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -1007,9 +1167,10 @@ void WebServer::on_date_update(datetime::DateEntity *obj) {
 }
 void WebServer::handle_date_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_dates()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->date_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -1070,9 +1231,10 @@ void WebServer::on_time_update(datetime::TimeEntity *obj) {
 }
 void WebServer::handle_time_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_times()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->time_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -1132,9 +1294,10 @@ void WebServer::on_datetime_update(datetime::DateTimeEntity *obj) {
 }
 void WebServer::handle_datetime_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_datetimes()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->datetime_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -1196,10 +1359,11 @@ void WebServer::on_text_update(text::Text *obj) {
 }
 void WebServer::handle_text_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_texts()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->text_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -1252,10 +1416,11 @@ void WebServer::on_select_update(select::Select *obj) {
 }
 void WebServer::handle_select_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_selects()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->select_json_(obj, obj->has_state() ? obj->current_option() : "", detail);
       request->send(200, "application/json", data.c_str());
@@ -1309,10 +1474,11 @@ void WebServer::on_climate_update(climate::Climate *obj) {
 }
 void WebServer::handle_climate_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (auto *obj : App.get_climates()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->climate_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -1459,10 +1625,11 @@ void WebServer::on_lock_update(lock::Lock *obj) {
 }
 void WebServer::handle_lock_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (lock::Lock *obj : App.get_locks()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->lock_json_(obj, obj->state, detail);
       request->send(200, "application/json", data.c_str());
@@ -1533,10 +1700,11 @@ void WebServer::on_valve_update(valve::Valve *obj) {
 }
 void WebServer::handle_valve_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (valve::Valve *obj : App.get_valves()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->valve_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
@@ -1617,10 +1785,11 @@ void WebServer::on_alarm_control_panel_update(alarm_control_panel::AlarmControlP
 }
 void WebServer::handle_alarm_control_panel_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (alarm_control_panel::AlarmControlPanel *obj : App.get_alarm_control_panels()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->alarm_control_panel_json_(obj, obj->get_state(), detail);
       request->send(200, "application/json", data.c_str());
@@ -1698,11 +1867,12 @@ void WebServer::on_event(event::Event *obj) {
 
 void WebServer::handle_event_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (event::Event *obj : App.get_events()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
     // Note: request->method() is always HTTP_GET here (canHandle ensures this)
-    if (match.method_empty()) {
+    if (entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->event_json_(obj, "", detail);
       request->send(200, "application/json", data.c_str());
@@ -1767,10 +1937,11 @@ void WebServer::on_update(update::UpdateEntity *obj) {
 }
 void WebServer::handle_update_request(AsyncWebServerRequest *request, const UrlMatch &match) {
   for (update::UpdateEntity *obj : App.get_updates()) {
-    if (!match.id_equals_entity(obj))
+    auto entity_match = match.match_entity(obj);
+    if (!entity_match.matched)
       continue;
 
-    if (request->method() == HTTP_GET && match.method_empty()) {
+    if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       std::string data = this->update_json_(obj, detail);
       request->send(200, "application/json", data.c_str());
