@@ -1,12 +1,7 @@
 #include "ota_esphome.h"
 #ifdef USE_OTA
 #ifdef USE_OTA_PASSWORD
-#ifdef USE_OTA_MD5
-#include "esphome/components/md5/md5.h"
-#endif
-#ifdef USE_OTA_SHA256
 #include "esphome/components/sha256/sha256.h"
-#endif
 #endif
 #include "esphome/components/network/util.h"
 #include "esphome/components/ota/ota_backend.h"
@@ -30,15 +25,6 @@ static constexpr uint16_t OTA_BLOCK_SIZE = 8192;
 static constexpr size_t OTA_BUFFER_SIZE = 1024;                  // buffer size for OTA data transfer
 static constexpr uint32_t OTA_SOCKET_TIMEOUT_HANDSHAKE = 20000;  // milliseconds for initial handshake
 static constexpr uint32_t OTA_SOCKET_TIMEOUT_DATA = 90000;       // milliseconds for data transfer
-
-#ifdef USE_OTA_PASSWORD
-#ifdef USE_OTA_MD5
-static constexpr size_t MD5_HEX_SIZE = 32;  // MD5 hash as hex string (16 bytes * 2)
-#endif
-#ifdef USE_OTA_SHA256
-static constexpr size_t SHA256_HEX_SIZE = 64;  // SHA256 hash as hex string (32 bytes * 2)
-#endif
-#endif  // USE_OTA_PASSWORD
 
 void ESPHomeOTAComponent::setup() {
   this->server_ = socket::socket_ip_loop_monitored(SOCK_STREAM, 0);  // monitored for incoming connections
