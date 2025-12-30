@@ -195,7 +195,7 @@ class APIServer : public Component,
   struct HomeAssistantStateSubscription {
     const char *entity_id;  // Pointer to flash (internal) or heap (external)
     const char *attribute;  // Pointer to flash or nullptr (nullptr means no attribute)
-    std::function<void(std::string)> callback;
+    std::function<void(StringRef)> callback;
     bool once;
 
     // Dynamic storage for external components using std::string API (custom_api_device.h)
@@ -205,14 +205,20 @@ class APIServer : public Component,
   };
 
   // New const char* overload (for internal components - zero allocation)
-  void subscribe_home_assistant_state(const char *entity_id, const char *attribute, std::function<void(std::string)> f);
-  void get_home_assistant_state(const char *entity_id, const char *attribute, std::function<void(std::string)> f);
+  void subscribe_home_assistant_state(const char *entity_id, const char *attribute, std::function<void(StringRef)> f);
+  void get_home_assistant_state(const char *entity_id, const char *attribute, std::function<void(StringRef)> f);
 
-  // Existing std::string overload (for custom_api_device.h - heap allocation)
+  // std::string overload with StringRef callback (for custom_api_device.h with zero-allocation callback)
   void subscribe_home_assistant_state(std::string entity_id, optional<std::string> attribute,
-                                      std::function<void(std::string)> f);
+                                      std::function<void(StringRef)> f);
   void get_home_assistant_state(std::string entity_id, optional<std::string> attribute,
-                                std::function<void(std::string)> f);
+                                std::function<void(StringRef)> f);
+
+  // Legacy std::string overload (for custom_api_device.h - converts StringRef to std::string for callback)
+  void subscribe_home_assistant_state(std::string entity_id, optional<std::string> attribute,
+                                      std::function<void(const std::string &)> f);
+  void get_home_assistant_state(std::string entity_id, optional<std::string> attribute,
+                                std::function<void(const std::string &)> f);
 
   const std::vector<HomeAssistantStateSubscription> &get_state_subs() const;
 #endif
@@ -236,10 +242,12 @@ class APIServer : public Component,
 #endif  // USE_API_NOISE
 #ifdef USE_API_HOMEASSISTANT_STATES
   // Helper methods to reduce code duplication
-  void add_state_subscription_(const char *entity_id, const char *attribute, std::function<void(std::string)> f,
+  void add_state_subscription_(const char *entity_id, const char *attribute, std::function<void(StringRef)> f,
+                               bool once);
+  void add_state_subscription_(std::string entity_id, optional<std::string> attribute, std::function<void(StringRef)> f,
                                bool once);
   void add_state_subscription_(std::string entity_id, optional<std::string> attribute,
-                               std::function<void(std::string)> f, bool once);
+                               std::function<void(const std::string &)> f, bool once);
 #endif  // USE_API_HOMEASSISTANT_STATES
   // Pointers and pointer-like types first (4 bytes each)
   std::unique_ptr<socket::Socket> socket_ = nullptr;

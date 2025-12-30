@@ -122,15 +122,27 @@ class CustomAPIDevice {
    *   subscribe_homeassistant_state(&CustomNativeAPI::on_state_changed, "climate.kitchen", "current_temperature");
    * }
    *
-   * void on_state_changed(std::string state) {
-   *   // State of sensor.weather_forecast is `state`
+   * void on_state_changed(StringRef state) {
+   *   // State of climate.kitchen current_temperature is `state`
+   *   // Use state.c_str() for C string, state.str() for std::string
    * }
    * ```
    *
    * @tparam T The class type creating the service, automatically deduced from the function pointer.
-   * @param callback The member function to call when the entity state changes.
+   * @param callback The member function to call when the entity state changes (zero-allocation).
    * @param entity_id The entity_id to track.
    * @param attribute The entity state attribute to track.
+   */
+  template<typename T>
+  void subscribe_homeassistant_state(void (T::*callback)(StringRef), const std::string &entity_id,
+                                     const std::string &attribute = "") {
+    auto f = std::bind(callback, (T *) this, std::placeholders::_1);
+    global_api_server->subscribe_home_assistant_state(entity_id, optional<std::string>(attribute), std::move(f));
+  }
+
+  /** Subscribe to the state (or attribute state) of an entity from Home Assistant (legacy std::string version).
+   *
+   * @deprecated Use the StringRef overload for zero-allocation callbacks.
    */
   template<typename T>
   void subscribe_homeassistant_state(void (T::*callback)(std::string), const std::string &entity_id,
@@ -148,15 +160,26 @@ class CustomAPIDevice {
    *   subscribe_homeassistant_state(&CustomNativeAPI::on_state_changed, "sensor.weather_forecast");
    * }
    *
-   * void on_state_changed(std::string entity_id, std::string state) {
+   * void on_state_changed(const std::string &entity_id, StringRef state) {
    *   // State of `entity_id` is `state`
    * }
    * ```
    *
    * @tparam T The class type creating the service, automatically deduced from the function pointer.
-   * @param callback The member function to call when the entity state changes.
+   * @param callback The member function to call when the entity state changes (zero-allocation for state).
    * @param entity_id The entity_id to track.
    * @param attribute The entity state attribute to track.
+   */
+  template<typename T>
+  void subscribe_homeassistant_state(void (T::*callback)(const std::string &, StringRef), const std::string &entity_id,
+                                     const std::string &attribute = "") {
+    auto f = std::bind(callback, (T *) this, entity_id, std::placeholders::_1);
+    global_api_server->subscribe_home_assistant_state(entity_id, optional<std::string>(attribute), std::move(f));
+  }
+
+  /** Subscribe to the state (or attribute state) of an entity from Home Assistant (legacy std::string version).
+   *
+   * @deprecated Use the StringRef overload for zero-allocation callbacks.
    */
   template<typename T>
   void subscribe_homeassistant_state(void (T::*callback)(std::string, std::string), const std::string &entity_id,
@@ -166,7 +189,23 @@ class CustomAPIDevice {
   }
 #else
   template<typename T>
+  void subscribe_homeassistant_state(void (T::*callback)(StringRef), const std::string &entity_id,
+                                     const std::string &attribute = "") {
+    static_assert(sizeof(T) == 0,
+                  "subscribe_homeassistant_state() requires 'homeassistant_states: true' in the 'api:' section "
+                  "of your YAML configuration");
+  }
+
+  template<typename T>
   void subscribe_homeassistant_state(void (T::*callback)(std::string), const std::string &entity_id,
+                                     const std::string &attribute = "") {
+    static_assert(sizeof(T) == 0,
+                  "subscribe_homeassistant_state() requires 'homeassistant_states: true' in the 'api:' section "
+                  "of your YAML configuration");
+  }
+
+  template<typename T>
+  void subscribe_homeassistant_state(void (T::*callback)(const std::string &, StringRef), const std::string &entity_id,
                                      const std::string &attribute = "") {
     static_assert(sizeof(T) == 0,
                   "subscribe_homeassistant_state() requires 'homeassistant_states: true' in the 'api:' section "

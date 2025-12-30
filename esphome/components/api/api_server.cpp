@@ -423,18 +423,18 @@ void APIServer::handle_action_response(uint32_t call_id, bool success, const std
 #endif  // USE_API_HOMEASSISTANT_SERVICES
 
 #ifdef USE_API_HOMEASSISTANT_STATES
-// Helper to add subscription (reduces duplication)
-void APIServer::add_state_subscription_(const char *entity_id, const char *attribute,
-                                        std::function<void(std::string)> f, bool once) {
+// Helper to add subscription (reduces duplication) - const char* version (zero allocation)
+void APIServer::add_state_subscription_(const char *entity_id, const char *attribute, std::function<void(StringRef)> f,
+                                        bool once) {
   this->state_subs_.push_back(HomeAssistantStateSubscription{
       .entity_id = entity_id, .attribute = attribute, .callback = std::move(f), .once = once,
       // entity_id_dynamic_storage and attribute_dynamic_storage remain nullptr (no heap allocation)
   });
 }
 
-// Helper to add subscription with heap-allocated strings (reduces duplication)
+// Helper to add subscription with heap-allocated strings and StringRef callback
 void APIServer::add_state_subscription_(std::string entity_id, optional<std::string> attribute,
-                                        std::function<void(std::string)> f, bool once) {
+                                        std::function<void(StringRef)> f, bool once) {
   HomeAssistantStateSubscription sub;
   // Allocate heap storage for the strings
   sub.entity_id_dynamic_storage = std::make_unique<std::string>(std::move(entity_id));
@@ -452,25 +452,45 @@ void APIServer::add_state_subscription_(std::string entity_id, optional<std::str
   this->state_subs_.push_back(std::move(sub));
 }
 
+// Legacy helper: wraps std::string callback and delegates to StringRef version
+void APIServer::add_state_subscription_(std::string entity_id, optional<std::string> attribute,
+                                        std::function<void(const std::string &)> f, bool once) {
+  // Wrap callback to convert StringRef -> std::string, then delegate
+  this->add_state_subscription_(std::move(entity_id), std::move(attribute),
+                                std::function<void(StringRef)>([f = std::move(f)](StringRef state) { f(state.str()); }),
+                                once);
+}
+
 // New const char* overload (for internal components - zero allocation)
 void APIServer::subscribe_home_assistant_state(const char *entity_id, const char *attribute,
-                                               std::function<void(std::string)> f) {
+                                               std::function<void(StringRef)> f) {
   this->add_state_subscription_(entity_id, attribute, std::move(f), false);
 }
 
 void APIServer::get_home_assistant_state(const char *entity_id, const char *attribute,
-                                         std::function<void(std::string)> f) {
+                                         std::function<void(StringRef)> f) {
   this->add_state_subscription_(entity_id, attribute, std::move(f), true);
 }
 
-// Existing std::string overload (for custom_api_device.h - heap allocation)
+// std::string overload with StringRef callback (zero-allocation callback)
 void APIServer::subscribe_home_assistant_state(std::string entity_id, optional<std::string> attribute,
-                                               std::function<void(std::string)> f) {
+                                               std::function<void(StringRef)> f) {
   this->add_state_subscription_(std::move(entity_id), std::move(attribute), std::move(f), false);
 }
 
 void APIServer::get_home_assistant_state(std::string entity_id, optional<std::string> attribute,
-                                         std::function<void(std::string)> f) {
+                                         std::function<void(StringRef)> f) {
+  this->add_state_subscription_(std::move(entity_id), std::move(attribute), std::move(f), true);
+}
+
+// Legacy std::string overload (for custom_api_device.h - converts StringRef to std::string)
+void APIServer::subscribe_home_assistant_state(std::string entity_id, optional<std::string> attribute,
+                                               std::function<void(const std::string &)> f) {
+  this->add_state_subscription_(std::move(entity_id), std::move(attribute), std::move(f), false);
+}
+
+void APIServer::get_home_assistant_state(std::string entity_id, optional<std::string> attribute,
+                                         std::function<void(const std::string &)> f) {
   this->add_state_subscription_(std::move(entity_id), std::move(attribute), std::move(f), true);
 }
 

@@ -1711,9 +1711,8 @@ void APIConnection::on_home_assistant_state_response(const HomeAssistantStateRes
       continue;
     }
 
-    // Create temporary string for callback (callback takes const std::string &)
-    // Handle empty state (nullptr with len=0)
-    std::string state(msg.state_len > 0 ? reinterpret_cast<const char *>(msg.state) : "", msg.state_len);
+    // Create StringRef directly from message data (zero allocation)
+    StringRef state(reinterpret_cast<const char *>(msg.state), msg.state_len);
     it.callback(state);
   }
 }
